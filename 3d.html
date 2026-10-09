@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>3D Airspace Radar</title>
+
+    <!-- CesiumJS -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+
+    <link
+        href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css"
+        rel="stylesheet"
+    >
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+
+            margin: 0;
+
+            overflow: hidden;
+
+            background: #05070b;
+
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+
+            color: white;
+        }
+
+
+        #cesiumContainer {
+
+            width: 100vw;
+
+            height: 100vh;
+        }
+
+
+        /* ==========================================
+           TOP DASHBOARD
+        ========================================== */
+
+        .dashboard {
+
+            position: absolute;
+
+            top: 18px;
+
+            left: 18px;
+
+            z-index: 1000;
+
+            width: 310px;
+
+            padding: 20px;
+
+            background:
+                rgba(7, 10, 17, 0.92);
+
+            border-radius: 14px;
+
+            backdrop-filter: blur(12px);
+
+            box-shadow:
+                0 10px 35px
+                rgba(0, 0, 0, 0.45);
+        }
+
+
+        .dashboard h1 {
+
+            margin: 0 0 8px 0;
+
+            font-size: 22px;
+        }
+
+
+        .subtitle {
+
+            color: #9fa8ba;
+
+            font-size: 12px;
+
+            margin-bottom: 18px;
+        }
+
+
+        .status {
+
+            padding: 9px;
+
+            background: #111722;
+
+            border-radius: 8px;
+
+            font-size: 12px;
+
+            margin-bottom: 15px;
+        }
+
+
+        /* ==========================================
+           STATISTICS
+        ========================================== */
+
+        .stats {
+
+            display: grid;
+
+            grid-template-columns:
+                1fr 1fr;
+
+            gap: 8px;
+        }
+
+
+        .stat {
+
+            background: #111722;
+
+            padding: 12px;
+
+            border-radius: 8px;
+        }
+
+
+        .stat-number {
+
+            font-size: 21px;
+
+            font-weight: bold;
+        }
+
+
+        .stat-label {
+
+            font-size: 11px;
+
+            color: #9fa8ba;
+
+            margin-top: 4px;
+        }
+
+
+        /* ==========================================
+           LEGEND
+        ========================================== */
+
+        .legend {
+
+            margin-top: 15px;
+
+            padding-top: 12px;
+
+            border-top:
+                1px solid #293140;
+        }
+
+
+        .legend-item {
+
+            display: flex;
+
+            align-items: center;
+
+            gap: 8px;
+
+            margin: 7px 0;
+
+            font-size: 12px;
+        }
+
+
+        .dot {
+
+            width: 10px;
+
+            height: 10px;
+
+            border-radius: 50%;
+        }
+
+
+        .climbing {
+
+            background: #35d07f;
+        }
+
+
+        .cruising {
+
+            background: #3aa7ff;
+        }
+
+
+        .descending {
+
+            background: #ff5252;
+        }
+
+
+        .unknown {
+
+            background: #b6bcc8;
+        }
+
+
+        /* ==========================================
+           BACK BUTTON
+        ========================================== */
+
+        .back-button {
+
+            position: absolute;
+
+            top: 18px;
+
+            right: 18px;
+
+            z-index: 1000;
+
+            padding: 11px 15px;
+
+            background:
+                rgba(7, 10, 17, 0.92);
+
+            color: white;
+
+            border: 1px solid #293140;
+
+            border-radius: 8px;
+
+            cursor: pointer;
+
+            font-size: 12px;
+
+            text-decoration: none;
+        }
+
+
+        .back-button:hover {
+
+            background: #151c29;
+        }
+
+
+        /* ==========================================
+           SELECTED FLIGHT
+        ========================================== */
+
+        .selected-flight {
+
+            position: absolute;
+
+            bottom: 20px;
+
+            right: 20px;
+
+            z-index: 1000;
+
+            width: 280px;
+
+            padding: 16px;
+
+            background:
+                rgba(7, 10, 17, 0.94);
+
+            border-radius: 12px;
+
+            display: none;
+
+            box-shadow:
+                0 10px 35px
+                rgba(0, 0, 0, 0.45);
+        }
+
+
+        .selected-title {
+
+            font-size: 18px;
+
+            font-weight: bold;
+
+            margin-bottom: 10px;
+        }
+
+
+        .selected-row {
+
+            display: flex;
+
+            justify-content: space-between;
+
+            padding: 6px 0;
+
+            border-bottom:
+                1px solid #1d2532;
+
+            font-size: 12px;
+        }
+
+
+        .selected-label {
+
+            color: #9fa8ba;
+        }
+
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+    <!-- ==========================================
+         3D GLOBE
+    ========================================== -->
+
+    <div id="cesiumContainer"></div>
+
+
+    <!-- ==========================================
+         DASHBOARD
+    ========================================== -->
+
+    <div class="dashboard">
+
+        <h1>
+            ✈ 3D Airspace Radar
+        </h1>
+
+        <div class="subtitle">
+            Heathrow Airspace Monitoring System
+        </div>
+
+        <div
+            class="status"
+            id="status"
+        >
+            Connecting to radar...
+        </div>
+
+
+        <div class="stats">
+
+            <div class="stat">
+
+                <div
+                    class="stat-number"
+                    id="aircraftCount"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    Aircraft
+                </div>
+
+            </div>
+
+
+            <div class="stat">
+
+                <div
+                    class="stat-number"
+                    id="climbingCount"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    Climbing
+                </div>
+
+            </div>
+
+
+            <div class="stat">
+
+                <div
+                    class="stat-number"
+                    id="cruisingCount"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    Cruising
+                </div>
+
+            </div>
+
+
+            <div class="stat">
+
+                <div
+                    class="stat-number"
+                    id="descendingCount"
+                >
+                    0
+                </div>
+
+                <div class="stat-label">
+                    Descending
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- ======================================
+             LEGEND
+        ====================================== -->
+
+        <div class="legend">
+
+            <div class="legend-item">
+
+                <span class="dot climbing"></span>
+
+                Climbing
+
+            </div>
+
+
+            <div class="legend-item">
+
+                <span class="dot cruising"></span>
+
+                Cruising
+
+            </div>
+
+
+            <div class="legend-item">
+
+                <span class="dot descending"></span>
+
+                Descending
+
+            </div>
+
+
+            <div class="legend-item">
+
+                <span class="dot unknown"></span>
+
+                Unknown
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- ==========================================
+         BACK TO 2D
+    ========================================== -->
+
+    <a
+        class="back-button"
+        href="/"
+    >
+        ← 2D Radar
+    </a>
+
+
+    <!-- ==========================================
+         SELECTED FLIGHT CARD
+    ========================================== -->
+
+    <div
+        class="selected-flight"
+        id="selectedFlight"
+    >
+
+        <div
+            class="selected-title"
+            id="selectedCallsign"
+        >
+            Flight
+        </div>
+
+
+        <div class="selected-row">
+
+            <span class="selected-label">
+                Country
+            </span>
+
+            <span id="selectedCountry">
+                —
+            </span>
+
+        </div>
+
+
+        <div class="selected-row">
+
+            <span class="selected-label">
+                Altitude
+            </span>
+
+            <span id="selectedAltitude">
+                —
+            </span>
+
+        </div>
+
+
+        <div class="selected-row">
+
+            <span class="selected-label">
+                Speed
+            </span>
+
+            <span id="selectedSpeed">
+                —
+            </span>
+
+        </div>
+
+
+        <div class="selected-row">
+
+            <span class="selected-label">
+                Phase
+            </span>
+
+            <span id="selectedPhase">
+                —
+            </span>
+
+        </div>
+
+
+        <div class="selected-row">
+
+            <span class="selected-label">
+                Distance
+            </span>
+
+            <span id="selectedDistance">
+                —
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <script>
+
+        // ==================================================
+        // CESIUM SETUP
+        // ==================================================
+
+        const viewer = new Cesium.Viewer(
+            "cesiumContainer",
+            {
+
+                animation: false,
+
+                timeline: false,
+
+                baseLayerPicker: false,
+
+                geocoder: false,
+
+                homeButton: true,
+
+                sceneModePicker: true,
+
+                navigationHelpButton: false,
+
+                fullscreenButton: true
+
+            }
+        );
+
+
+        // Disable unnecessary animation
+        viewer.clock.shouldAnimate = true;
+
+
+        // ==================================================
+        // HEATHROW
+        // ==================================================
+
+        const AIRPORT_LAT = 51.4700;
+
+        const AIRPORT_LON = -0.4543;
+
+
+        // ==================================================
+        // CAMERA
+        // ==================================================
+
+        viewer.camera.flyTo({
+
+            destination:
+                Cesium.Cartesian3.fromDegrees(
+                    AIRPORT_LON,
+                    AIRPORT_LAT,
+                    180000
+                ),
+
+            orientation: {
+
+                heading: Cesium.Math.toRadians(0),
+
+                pitch:
+                    Cesium.Math.toRadians(-65),
+
+                roll: 0
+
+            },
+
+            duration: 2
+
+        });
+
+
+        // ==================================================
+        // AIRPORT MARKER
+        // ==================================================
+
+        viewer.entities.add({
+
+            name: "London Heathrow Airport",
+
+            position:
+                Cesium.Cartesian3.fromDegrees(
+                    AIRPORT_LON,
+                    AIRPORT_LAT,
+                    0
+                ),
+
+            point: {
+
+                pixelSize: 12,
+
+                color:
+                    Cesium.Color.WHITE,
+
+                outlineColor:
+                    Cesium.Color.BLACK,
+
+                outlineWidth: 2
+
+            },
+
+            label: {
+
+                text:
+                    "LHR • Heathrow Airport",
+
+                font:
+                    "14px Arial",
+
+                fillColor:
+                    Cesium.Color.WHITE,
+
+                outlineColor:
+                    Cesium.Color.BLACK,
+
+                outlineWidth: 3,
+
+                style:
+                    Cesium.LabelStyle.FILL_AND_OUTLINE,
+
+                verticalOrigin:
+                    Cesium.VerticalOrigin.BOTTOM,
+
+                pixelOffset:
+                    new Cesium.Cartesian2(0, -15)
+
+            }
+
+        });
+
+
+        // ==================================================
+        // 100 KM GEOFENCE
+        // ==================================================
+
+        viewer.entities.add({
+
+            name:
+                "100 km Monitoring Zone",
+
+            position:
+                Cesium.Cartesian3.fromDegrees(
+                    AIRPORT_LON,
+                    AIRPORT_LAT
+                ),
+
+            ellipse: {
+
+                semiMajorAxis: 100000,
+
+                semiMinorAxis: 100000,
+
+                material:
+                    Cesium.Color.BLUE.withAlpha(0.04),
+
+                outline: true,
+
+                outlineColor:
+                    Cesium.Color.CYAN.withAlpha(0.6),
+
+                height: 0
+
+            }
+
+        });
+
+
+        // ==================================================
+        // AIRCRAFT STORAGE
+        // ==================================================
+
+        const aircraftEntities = {};
+
+
+        // ==================================================
+        // COLORS
+        // ==================================================
+
+        function getFlightColor(phase) {
+
+            if (phase === "CLIMBING") {
+
+                return Cesium.Color.LIME;
+
+            }
+
+            if (phase === "DESCENDING") {
+
+                return Cesium.Color.RED;
+
+            }
+
+            if (phase === "CRUISING") {
+
+                return Cesium.Color.DODGERBLUE;
+
+            }
+
+            return Cesium.Color.LIGHTGRAY;
+
+        }
+
+
+        // ==================================================
+        // CREATE AIRCRAFT
+        // ==================================================
+
+        function createAircraft(flight) {
+
+            const altitude =
+                flight.altitude || 1000;
+
+
+            const position =
+                Cesium.Cartesian3.fromDegrees(
+
+                    flight.longitude,
+
+                    flight.latitude,
+
+                    altitude
+
+                );
+
+
+            const entity =
+                viewer.entities.add({
+
+                    name:
+                        flight.callsign,
+
+                    position:
+                        position,
+
+                    point: {
+
+                        pixelSize: 11,
+
+                        color:
+                            getFlightColor(
+                                flight.flight_phase
+                            ),
+
+                        outlineColor:
+                            Cesium.Color.WHITE,
+
+                        outlineWidth: 1
+
+                    },
+
+                    label: {
+
+                        text:
+                            flight.callsign,
+
+                        font:
+                            "12px Arial",
+
+                        fillColor:
+                            Cesium.Color.WHITE,
+
+                        outlineColor:
+                            Cesium.Color.BLACK,
+
+                        outlineWidth: 3,
+
+                        style:
+                            Cesium.LabelStyle
+                                .FILL_AND_OUTLINE,
+
+                        verticalOrigin:
+                            Cesium.VerticalOrigin.BOTTOM,
+
+                        pixelOffset:
+                            new Cesium.Cartesian2(
+                                0,
+                                -14
+                            ),
+
+                        showBackground: true,
+
+                        backgroundColor:
+                            Cesium.Color.BLACK
+                                .withAlpha(0.65)
+
+                    }
+
+                });
+
+
+            entity.description = `
+
+                <h3>${flight.callsign}</h3>
+
+                <p>
+                    <b>Country:</b>
+                    ${flight.country}
+                </p>
+
+                <p>
+                    <b>Altitude:</b>
+                    ${
+                        flight.altitude !== null
+                        ? Math.round(
+                            flight.altitude
+                          ) + " m"
+                        : "Unknown"
+                    }
+                </p>
+
+                <p>
+                    <b>Speed:</b>
+                    ${
+                        flight.velocity !== null
+                        ? flight.velocity.toFixed(1)
+                        : "Unknown"
+                    }
+                    m/s
+                </p>
+
+                <p>
+                    <b>Phase:</b>
+                    ${flight.flight_phase}
+                </p>
+
+                <p>
+                    <b>Distance:</b>
+                    ${flight.distance_from_airport}
+                    km
+                </p>
+
+            `;
+
+
+            return entity;
+
+        }
+
+
+        // ==================================================
+        // UPDATE AIRCRAFT
+        // ==================================================
+
+        function updateAircraft(flight) {
+
+            const id =
+                flight.icao24;
+
+
+            const altitude =
+                flight.altitude || 1000;
+
+
+            const position =
+                Cesium.Cartesian3.fromDegrees(
+
+                    flight.longitude,
+
+                    flight.latitude,
+
+                    altitude
+
+                );
+
+
+            // Existing aircraft
+            if (aircraftEntities[id]) {
+
+                const entity =
+                    aircraftEntities[id];
+
+
+                entity.position =
+                    position;
+
+
+                entity.point.color =
+                    getFlightColor(
+                        flight.flight_phase
+                    );
+
+
+                entity.label.text =
+                    flight.callsign;
+
+
+                entity.description = `
+
+                    <h3>${flight.callsign}</h3>
+
+                    <p>
+                        <b>Country:</b>
+                        ${flight.country}
+                    </p>
+
+                    <p>
+                        <b>Altitude:</b>
+                        ${
+                            flight.altitude !== null
+                            ? Math.round(
+                                flight.altitude
+                              ) + " m"
+                            : "Unknown"
+                        }
+                    </p>
+
+                    <p>
+                        <b>Speed:</b>
+                        ${
+                            flight.velocity !== null
+                            ? flight.velocity.toFixed(1)
+                            : "Unknown"
+                        }
+                        m/s
+                    </p>
+
+                    <p>
+                        <b>Phase:</b>
+                        ${flight.flight_phase}
+                    </p>
+
+                    <p>
+                        <b>Distance:</b>
+                        ${flight.distance_from_airport}
+                        km
+                    </p>
+
+                `;
+
+            }
+
+            // New aircraft
+            else {
+
+                aircraftEntities[id] =
+                    createAircraft(
+                        flight
+                    );
+
+            }
+
+        }
+
+
+        // ==================================================
+        // DASHBOARD
+        // ==================================================
+
+        function updateDashboard(aircraft) {
+
+            let climbing = 0;
+
+            let cruising = 0;
+
+            let descending = 0;
+
+
+            aircraft.forEach(
+                flight => {
+
+                    if (
+                        flight.flight_phase
+                        === "CLIMBING"
+                    ) {
+
+                        climbing++;
+
+                    }
+
+                    else if (
+                        flight.flight_phase
+                        === "CRUISING"
+                    ) {
+
+                        cruising++;
+
+                    }
+
+                    else if (
+                        flight.flight_phase
+                        === "DESCENDING"
+                    ) {
+
+                        descending++;
+
+                    }
+
+                }
+            );
+
+
+            document.getElementById(
+                "aircraftCount"
+            ).textContent =
+                aircraft.length;
+
+
+            document.getElementById(
+                "climbingCount"
+            ).textContent =
+                climbing;
+
+
+            document.getElementById(
+                "cruisingCount"
+            ).textContent =
+                cruising;
+
+
+            document.getElementById(
+                "descendingCount"
+            ).textContent =
+                descending;
+
+        }
+
+
+        // ==================================================
+        // LOAD RADAR DATA
+        // ==================================================
+
+        async function loadFlights() {
+
+            try {
+
+                const response =
+                    await fetch(
+                        "/api/flights"
+                    );
+
+
+                const data =
+                    await response.json();
+
+
+                if (data.error) {
+
+                    throw new Error(
+                        data.error
+                    );
+
+                }
+
+
+                const aircraft =
+                    data.aircraft;
+
+
+                updateDashboard(
+                    aircraft
+                );
+
+
+                const currentIDs =
+                    new Set();
+
+
+                aircraft.forEach(
+                    flight => {
+
+                        currentIDs.add(
+                            flight.icao24
+                        );
+
+
+                        updateAircraft(
+                            flight
+                        );
+
+                    }
+                );
+
+
+                // Remove aircraft
+                // that disappeared
+
+                Object.keys(
+                    aircraftEntities
+                ).forEach(
+                    id => {
+
+                        if (
+                            !currentIDs.has(id)
+                        ) {
+
+                            viewer.entities.remove(
+                                aircraftEntities[id]
+                            );
+
+
+                            delete
+                                aircraftEntities[id];
+
+                        }
+
+                    }
+                );
+
+
+                document.getElementById(
+                    "status"
+                ).textContent =
+
+                    "● " +
+                    (data.source || "RADAR") +
+                    " • Updated " +
+                    new Date()
+                        .toLocaleTimeString();
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    "3D Radar error:",
+                    error
+                );
+
+
+                document.getElementById(
+                    "status"
+                ).textContent =
+                    "⚠ Radar connection error";
+
+            }
+
+        }
+
+
+        // ==================================================
+        // FIRST LOAD
+        // ==================================================
+
+        loadFlights();
+
+
+        // ==================================================
+        // UPDATE EVERY 20 SECONDS
+        // ==================================================
+
+        setInterval(
+            loadFlights,
+            20000
+        );
+
+
+        // ==================================================
+        // CLICK AIRCRAFT
+        // ==================================================
+
+        viewer.selectedEntityChanged.addEventListener(
+            function(entity) {
+
+                if (!entity) {
+
+                    return;
+
+                }
+
+
+                const id =
+                    Object.keys(
+                        aircraftEntities
+                    ).find(
+                        key =>
+                            aircraftEntities[key]
+                            === entity
+                    );
+
+
+                if (!id) {
+
+                    return;
+
+                }
+
+
+                // We don't have the
+                // original flight object here,
+                // so use entity description
+                // through Cesium.
+
+                document.getElementById(
+                    "selectedFlight"
+                ).style.display =
+                    "block";
+
+
+                document.getElementById(
+                    "selectedCallsign"
+                ).textContent =
+                    entity.name;
+
+            }
+        );
+
+
+    </script>
+
+</body>
+
+</html>
