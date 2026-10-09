@@ -717,7 +717,157 @@ def home():
 def three_d():
     return send_from_directory(".", "3d.html")
 
+# ============================================================
+# AIRPORT ARRIVALS & DEPARTURES - NEXT 30 MINUTES
+# ============================================================
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+AERODATABOX_API_KEY = os.getenv("AERODATABOX_API_KEY")
+
+AIRPORT_TIMEZONES = {
+    "LHR": "Europe/London",
+    "DXB": "Asia/Dubai",
+    "JED": "Asia/Riyadh"
+}
+
+AIRPORT_BOARD_CACHE = {}
+AIRPORT_BOARD_CACHE_TIME = {}
+AIRPORT_BOARD_CACHE_SECONDS = 60
+
+
+def get_airport_board(airport_code):
+    if airport_code not in AIRPORTS:
+        raise ValueError("Unsupported airport")
+
+    now = time.time()
+
+    # Avoid repeatedly using API credits when refreshing the dashboard.
+    if (
+        airport_code in AIRPORT_BOARD_CACHE
+        and now - AIRPORT_BOARD_CACHE_TIME.get(airport_code, 0)
+        < AIRPORT_BOARD_CACHE_SECONDS
+    ):
+        return AIRPORT_BOARD_CACHE[airport_code], True
+
+    if not AERODATABOX_API_KEY:
+        return {
+            "configured": False,
+            "message": (
+                "Add AERODATABOX_API_KEY to enable real "
+                "airport schedules."
+            ),
+            "arrivals": [],
+            "departures": []
+        }, False
+
+    timezone_name = AIRPORT_TIMEZONES[airport_code]
+    airport_now = datetime.now(ZoneInfo(timezone_name))
+    window_end = airport_now + timedelta(minutes=30)
+
+    from_local = airport_now.strftime("%Y-%m-%dT%H:%M")
+    to_local = window_end.strftime("%Y-%m-%dT%H:%M")
+
+    url = (
+        "https://aerodatabox.p.rapidapi.com/"
+        f"flights/airports/iata/{airport_code}/"
+        f"{from_local}/{to_local}"
+    )
+
+    headers = {
+        "X-RapidAPI-Key": AERODATABOX_API_KEY,
+        "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"
+    }
+
+    params = {
+        "direction": "Both",
+        "withCancelled": "false",
+        "withCodeshared": "true",
+        "withCargo": "false",
+        "withPrivate": "false"
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        params=params,
+        timeout=20
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # The FIDS response contains arrivals and departures.
+    # Handle both the usual object response and a list response.
+    if isinstance(data, list):
+        arrivals = [
+            f for f in data
+            if isinstance(f, dict)
+            and f.get("movement", "").lower() == "arrival"
+        ]
+        departures = [
+            f for f in data
+            if isinstance(f, dict)
+            and f.get("movement", "").lower() == "departure"
+        ]
+    else:
+        arrivals = data.get("arrivals", []) or []
+        departures = data.get("departures", []) or []
+
+    result = {
+        "configured": True,
+        "airport": AIRPORTS[airport_code]["name"],
+        "airport_code": airport_code,
+        "timezone": timezone_name,
+        "window_start": from_local,
+        "window_end": to_local,
+        "arrivals": arrivals,
+        "departures": departures
+    }
+
+    AIRPORT_BOARD_CACHE[airport_code] = result
+    AIRPORT_BOARD_CACHE_TIME[airport_code] = now
+
+    return result, False
+
+
+@app.route("/api/airport-board")
+def api_airport_board():
+    airport_code = request.args.get(
+        "airport", DEFAULT_AIRPORT_CODE
+    ).strip().upper()
+
+    if airport_code not in AIRPORTS:
+        return jsonify({
+            "error": "Unsupported airport",
+            "available_airports": list(AIRPORTS.keys())
+        }), 400
+
+    try:
+        board, cached = get_airport_board(airport_code)
+        board["cached"] = cached
+        return jsonify(board)
+
+    except requests.RequestException as error:
+        print("Airport board API error:", error)
+
+        return jsonify({
+            "error": "Unable to retrieve airport schedules.",
+            "details": str(error),
+            "airport_code": airport_code,
+            "arrivals": [],
+            "departures": []
+        }), 502
+
+    except Exception as error:
+        print("Airport board error:", error)
+
+        return jsonify({
+            "error": str(error),
+            "airport_code": airport_code,
+            "arrivals": [],
+            "departures": []
+        }), 500
 # ============================================================
 # STARTUP
 # ============================================================

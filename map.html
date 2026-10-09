@@ -367,7 +367,37 @@
         <option value="DXB">🇦🇪 Dubai International (DXB)</option>
         <option value="JED">🇸🇦 Jeddah International (JED)</option>
     </select>
+<div class="section-title">Airport Flight Boards</div>
 
+<select id="boardAirportSelect">
+    <option value="LHR">London Heathrow — LHR</option>
+    <option value="DXB">Dubai International — DXB</option>
+    <option value="JED">Jeddah International — JED</option>
+</select>
+
+<div style="display:flex; gap:8px; margin-top:8px;">
+    <button id="arrivalsTab" onclick="showBoard('arrivals')">
+        ↓ Arrivals
+    </button>
+    <button id="departuresTab" class="secondary-button"
+            onclick="showBoard('departures')">
+        ↑ Departures
+    </button>
+</div>
+
+<div id="boardWindow"
+     style="font-size:11px;color:#94a3b8;margin-top:10px;">
+    Scheduled within the next 30 minutes
+</div>
+
+<div id="boardStatus"
+     style="font-size:12px;color:#38bdf8;margin-top:8px;">
+    Choose an airport to load its board.
+</div>
+
+<div id="airportFlightBoard"
+     style="margin-top:10px;">
+</div>
     <div class="stats">
 
         <div class="stat">
@@ -1453,7 +1483,392 @@ function clearHistoricalTrack() {
     historyEndMarker = null;
 }
 
+// ==========================================================
+// AIRPORT ARRIVALS & DEPARTURES DASHBOARD
+// ==========================================================
 
+let currentBoardType = "arrivals";
+let currentBoardData = null;
+
+function showBoard(type) {
+    currentBoardType = type;
+
+    document.getElementById("arrivalsTab").className =
+        type === "arrivals" ? "" : "secondary-button";
+
+    document.getElementById("departuresTab").className =
+        type === "departures" ? "" : "secondary-button";
+
+    renderAirportBoard();
+}
+
+
+function getAirportNameFromMovement(movement) {
+    if (!movement) return "Airport unavailable";
+
+    const airport = movement.airport || {};
+
+    return airport.name ||
+        airport.municipalityName ||
+        airport.icao ||
+        airport.iata ||
+        "Airport unavailable";
+}
+
+
+function getScheduledTime(flight, type) {
+    const movement = type === "arrivals"
+        ? flight.arrival
+        : flight.departure;
+
+    if (!movement) return "Time unavailable";
+
+    const scheduled = movement.scheduledTime || {};
+
+    return scheduled.local ||
+        scheduled.utc ||
+        "Time unavailable";
+}
+
+
+function renderAirportBoard() {
+    const container =
+        document.getElementById("airportFlightBoard");
+
+    container.replaceChildren();
+
+    if (!currentBoardData) {
+        container.textContent = "Loading flight schedules...";
+        return;
+    }
+
+    if (currentBoardData.configured === false) {
+        const message = document.createElement("div");
+        message.className = "board-empty";
+        message.textContent =
+            "Flight schedules need an API key. Configure " +
+            "AERODATABOX_API_KEY in the Flask server.";
+        container.appendChild(message);
+        return;
+    }
+
+    const flights = currentBoardData[currentBoardType] || [];
+
+    if (flights.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "board-empty";
+        empty.textContent =
+            "No scheduled flights were returned for this " +
+            "30-minute window. This does not necessarily mean " +
+            "there are no flights.";
+        container.appendChild(empty);
+        return;
+    }
+
+    flights.forEach(flight => {
+        const card = document.createElement("div");
+        card.className = "board-flight";
+
+        const airline = flight.airline?.name || "Airline unavailable";
+        const flightNumber = flight.number || "Flight number unavailable";
+
+        const origin = getAirportNameFromMovement(flight.departure);
+        const destination = getAirportNameFromMovement(flight.arrival);
+
+        const time = getScheduledTime(flight, currentBoardType);
+
+        const status = flight.status || "Scheduled";
+
+        const numberElement = document.createElement("div");
+        numberElement.className = "board-flight-number";
+        numberElement.textContent = flightNumber;
+
+        const airlineElement = document.createElement("div");
+        airlineElement.textContent = airline;
+
+        const routeElement = document.createElement("div");
+        routeElement.className = "board-flight-route";
+        routeElement.textContent =
+            `${origin} → ${destination}`;
+
+        const timeElement = document.createElement("div");
+        timeElement.className = "board-flight-time";
+        timeElement.textContent =
+            `${currentBoardType === "arrivals" ? "Arrival" : "Departure"}: ` +
+            `${time} · ${status}`;
+
+        card.append(
+            numberElement,
+            airlineElement,
+            routeElement,
+            timeElement
+        );
+
+        container.appendChild(card);
+    });
+}
+
+
+async function loadAirportBoard() {
+    
+function loadDemoAirportBoard() {
+  const airportCode =
+    document.getElementById("boardAirportSelect")?.value ||
+    document.getElementById("airportSelect")?.value ||
+    "LHR";
+
+  const board = buildDemoBoard(airportCode);
+
+  currentBoardData = board;
+  renderAirportBoard();
+}
+
+// Call this when changing the airport or switching to demo mode.
+    const airportCode =
+        document.getElementById("boardAirportSelect").value;
+
+    const statusElement =
+        document.getElementById("boardStatus");
+
+    currentBoardData = null;
+    renderAirportBoard();
+
+    statusElement.textContent =
+        `Loading ${airportCode} flight schedules...`;
+
+    try {
+        const response = await fetch(
+            `/api/airport-board?airport=${encodeURIComponent(airportCode)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                data.error || "Could not load flight schedules"
+            );
+        }
+
+        currentBoardData = data;
+
+        if (data.configured === false) {
+            statusElement.textContent =
+                "API key required for real flight schedules.";
+        } else {
+            statusElement.textContent =
+                `${data.airport || airportCode} · ` +
+                "Next 30 minutes" +
+                (data.cached ? " · Cached" : " · Updated");
+        }
+
+        renderAirportBoard();
+
+    } catch (error) {
+        console.error("Airport board error:", error);
+
+        currentBoardData = null;
+
+        const container =
+            document.getElementById("airportFlightBoard");
+
+        container.replaceChildren();
+
+        const errorMessage = document.createElement("div");
+        errorMessage.className = "board-empty";
+        errorMessage.textContent =
+            `Could not load schedules: ${error.message}`;
+
+        container.appendChild(errorMessage);
+
+        statusElement.textContent = "Schedule loading failed.";
+    }
+}
+
+
+// Selecting an airport on the dashboard also changes the radar map.
+document.getElementById("boardAirportSelect").addEventListener(
+    "change",
+    function () {
+        const airportCode = this.value;
+
+        document.getElementById("airportSelect").value =
+            airportCode;
+
+        updateAirportMap(airportCode);
+        removeAllAircraftMarkers();
+        updateDashboard([]);
+
+        closeInfo();
+        clearHistoricalTrack();
+
+        loadFlights();
+        loadAirportBoard();
+    }
+);
+
+
+// Keep the dashboard dropdown synchronized with the radar dropdown.
+document.getElementById("airportSelect").addEventListener(
+    "change",
+    function () {
+        document.getElementById("boardAirportSelect").value =
+            this.value;
+
+        loadAirportBoard();
+    }
+);
+
+
+// Load the initial board.
+loadAirportBoard();
+
+// Refresh the schedule board every 60 seconds.
+setInterval(loadAirportBoard, 60000);
+
+const DEMO_AIRPORT_BOARDS = {
+  LHR: {
+    name: "London Heathrow",
+    airlines: [
+      { name: "British Airways", code: "BA", destinations: [
+        ["JFK", "New York"], ["DXB", "Dubai"], ["SIN", "Singapore"],
+        ["DEL", "New Delhi"], ["JNB", "Johannesburg"], ["MAD", "Madrid"]
+      ]},
+      { name: "easyJet", code: "U2", destinations: [
+        ["AMS", "Amsterdam"], ["CDG", "Paris"], ["NCE", "Nice"],
+        ["GVA", "Geneva"], ["LIS", "Lisbon"], ["EDI", "Edinburgh"]
+      ]},
+      { name: "Virgin Atlantic", code: "VS", destinations: [
+        ["JFK", "New York"], ["MCO", "Orlando"], ["ATL", "Atlanta"],
+        ["LAX", "Los Angeles"], ["BOS", "Boston"], ["DEL", "New Delhi"]
+      ]},
+      { name: "Etihad Airways", code: "EY", destinations: [
+        ["AUH", "Abu Dhabi"]
+      ]},
+      { name: "United Airlines", code: "UA", destinations: [
+        ["EWR", "Newark"], ["IAD", "Washington Dulles"],
+        ["ORD", "Chicago"], ["SFO", "San Francisco"]
+      ]},
+      { name: "Singapore Airlines", code: "SQ", destinations: [
+        ["SIN", "Singapore"]
+      ]}
+    ]
+  },
+
+  DXB: {
+    name: "Dubai International",
+    airlines: [
+      { name: "Emirates", code: "EK", destinations: [
+        ["LHR", "London Heathrow"], ["BOM", "Mumbai"],
+        ["DEL", "New Delhi"], ["SIN", "Singapore"],
+        ["JFK", "New York"], ["CMB", "Colombo"]
+      ]},
+      { name: "flydubai", code: "FZ", destinations: [
+        ["KWI", "Kuwait City"], ["MCT", "Muscat"],
+        ["KHI", "Karachi"], ["TBS", "Tbilisi"],
+        ["AMM", "Amman"], ["RUH", "Riyadh"]
+      ]},
+      { name: "Air India", code: "AI", destinations: [
+        ["DEL", "New Delhi"], ["BOM", "Mumbai"],
+        ["HYD", "Hyderabad"], ["BLR", "Bengaluru"],
+        ["COK", "Kochi"]
+      ]},
+      { name: "Qatar Airways", code: "QR", destinations: [
+        ["DOH", "Doha"]
+      ]},
+      { name: "Jazeera Airways", code: "J9", destinations: [
+        ["KWI", "Kuwait City"]
+      ]}
+    ]
+  },
+
+  JED: {
+    name: "Jeddah King Abdulaziz",
+    airlines: [
+      { name: "Saudia", code: "SV", destinations: [
+        ["RUH", "Riyadh"], ["DMM", "Dammam"], ["CAI", "Cairo"],
+        ["DXB", "Dubai"], ["MED", "Madinah"], ["IST", "Istanbul"]
+      ]},
+      { name: "flynas", code: "XY", destinations: [
+        ["RUH", "Riyadh"], ["DMM", "Dammam"], ["CAI", "Cairo"],
+        ["DXB", "Dubai"], ["DOH", "Doha"], ["TZX", "Trabzon"]
+      ]},
+      { name: "flyadeal", code: "F3", destinations: [
+        ["RUH", "Riyadh"], ["DMM", "Dammam"],
+        ["AHB", "Abha"], ["CAI", "Cairo"], ["MED", "Madinah"]
+      ]},
+      { name: "Riyadh Air", code: "RX", destinations: [
+        ["RUH", "Riyadh"]
+      ]},
+      { name: "Kuwait Airways", code: "KU", destinations: [
+        ["KWI", "Kuwait City"]
+      ]},
+      { name: "Oman Air", code: "WY", destinations: [
+        ["MCT", "Muscat"]
+      ]}
+    ]
+  }
+};
+
+// Build demo arrival/departure records.
+// Times are illustrative, not actual scheduled or estimated times.
+function buildDemoBoard(airportCode) {
+  const airport = DEMO_AIRPORT_BOARDS[airportCode];
+  if (!airport) return { arrivals: [], departures: [] };
+
+  const arrivals = [];
+  const departures = [];
+
+  airport.airlines.forEach((airline, airlineIndex) => {
+    airline.destinations.forEach((destination, routeIndex) => {
+      // Arrival: destination -> selected airport
+      arrivals.push({
+        flightNumber: `${airline.code}${100 + airlineIndex * 20 + routeIndex}`,
+        airline: airline.name,
+        originCode: destination[0],
+        origin: destination[1],
+        destinationCode: airportCode,
+        destination: airport.name,
+        scheduledTime: demoTime(arrivals.length, "arrivals"),
+        status: "Scheduled",
+        demo: true
+      });
+
+      // Departure: selected airport -> destination
+      departures.push({
+        flightNumber: `${airline.code}${500 + airlineIndex * 20 + routeIndex}`,
+        airline: airline.name,
+        originCode: airportCode,
+        origin: airport.name,
+        destinationCode: destination[0],
+        destination: destination[1],
+        scheduledTime: demoTime(departures.length, "departures"),
+        status: "Scheduled",
+        demo: true
+      });
+    });
+  });
+
+  // Ensure exactly 20 records in each board.
+  return {
+    arrivals: arrivals.slice(0, 20),
+    departures: departures.slice(0, 20)
+  };
+}
+
+function demoTime(index, type) {
+  const minutes = (index * 7 + (type === "departures" ? 3 : 0)) % 30;
+  const date = new Date(Date.now() + minutes * 60 * 1000);
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
+// Example:
+// const board = buildDemoBoard("LHR");
+// console.log(board.arrivals);   // 20 arrivals
+// console.log(board.departures); // 20 departures
 // ==========================================================
 // START RADAR
 // ==========================================================
@@ -1464,7 +1879,7 @@ loadFlights();
 refreshTimer = setInterval(() => {
     loadFlights();
 }, 20000);
-
+loadDemoAirportBoard();
 </script>
 
 </body>
