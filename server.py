@@ -872,6 +872,138 @@ def api_airport_board():
 # STARTUP
 # ============================================================
 
+# ==========================================================
+# ADSB.LOL BACKUP FLIGHT DATA — NO API KEY
+# ==========================================================
+
+import math
+import requests
+from flask import request, jsonify
+
+
+@app.route("/api/adsblol-flights")
+def api_adsblol_flights():
+    airport_code = request.args.get("airport", "LHR").upper()
+
+    if airport_code not in AIRPORTS:
+        return jsonify({
+            "error": "Unknown airport",
+            "aircraft": []
+        }), 400
+
+    airport = AIRPORTS[airport_code]
+
+    try:
+        url = (
+            "https://api.adsb.lol/v2/point/"
+            f"{airport['lat']}/{airport['lon']}/54"
+        )
+
+        response = requests.get(url, timeout=12)
+        response.raise_for_status()
+        data = response.json()
+
+        aircraft = []
+
+        for plane in data.get("ac", []):
+            lat = plane.get("lat")
+            lon = plane.get("lon")
+
+            if lat is None or lon is None:
+                continue
+
+            lat = float(lat)
+            lon = float(lon)
+
+            # Calculate distance from selected airport in km.
+            lat1 = math.radians(airport["lat"])
+            lat2 = math.radians(lat)
+            dlat = lat2 - lat1
+            dlon = math.radians(lon - airport["lon"])
+
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(lat1) * math.cos(lat2)
+                * math.sin(dlon / 2) ** 2
+            )
+
+            distance_km = (
+                6371 * 2 * math.atan2(
+                    math.sqrt(a),
+                    math.sqrt(max(0, 1 - a))
+                )
+            )
+
+            if distance_km > 100:
+                continue
+
+            # ADS-B altitude is normally in feet.
+            raw_altitude = plane.get("alt_baro")
+            altitude = None
+
+            if isinstance(raw_altitude, (int, float)):
+                altitude = raw_altitude * 0.3048
+
+            # Ground speed is normally in knots.
+            raw_speed = plane.get("gs")
+            velocity = (
+                raw_speed * 0.514444
+                if isinstance(raw_speed, (int, float))
+                else None
+            )
+
+            # Track is degrees clockwise from north.
+            heading = plane.get("track")
+
+            # Vertical rate is normally feet per minute.
+            vertical_rate = plane.get("baro_rate", 0) or 0
+
+            if vertical_rate > 300:
+                phase = "CLIMBING"
+            elif vertical_rate < -300:
+                phase = "DESCENDING"
+            else:
+                phase = "CRUISING"
+
+            callsign = (plane.get("flight") or "").strip()
+
+            aircraft.append({
+                "icao24": plane.get("hex", ""),
+                "callsign": callsign,
+                "latitude": lat,
+                "longitude": lon,
+                "altitude": altitude,
+                "velocity": velocity,
+                "heading": heading,
+                "flight_phase": phase,
+                "distance_from_airport": distance_km,
+                "country": "Unknown",
+                "source": "ADSB.lol"
+            })
+
+        return jsonify({
+            "airport_code": airport_code,
+            "source": "ADSB.lol backup feed",
+            "aircraft": aircraft,
+            "count": len(aircraft)
+        })
+
+    except requests.RequestException as error:
+        app.logger.warning("ADSB.lol request failed: %s", error)
+
+        return jsonify({
+            "error": "ADSB.lol is temporarily unavailable",
+            "aircraft": []
+        }), 502
+
+    except (ValueError, TypeError, KeyError) as error:
+        app.logger.exception("Could not process ADSB.lol data")
+
+        return jsonify({
+            "error": "Could not process backup flight data",
+            "aircraft": []
+        }), 500
+
 if __name__ == "__main__":
     setup_database()
 
