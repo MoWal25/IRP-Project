@@ -434,6 +434,54 @@
         .secondary-button { background: #334155; }
         .secondary-button:hover { background: #475569; }
 
+/* HEATHROW YOUTUBE LIVE VIDEO */
+.heathrow-video-section {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #273449;
+}
+
+.heathrow-video-details {
+    margin-top: 8px;
+    background: #111827;
+    border: 1px solid #273449;
+    border-radius: 9px;
+    padding: 10px;
+}
+
+.heathrow-video-details summary {
+    cursor: pointer;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1.5;
+}
+
+.heathrow-video-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 7px;
+    background: #020617;
+}
+
+.heathrow-video-frame iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.heathrow-video-note {
+    color: #94a3b8;
+    font-size: 10px;
+    line-height: 1.5;
+    margin-top: 8px;
+}
+
     </style>
 </head>
 
@@ -493,6 +541,41 @@
 <div id="airportFlightBoard"
      style="margin-top:10px;">
 </div>
+
+<!-- HEATHROW LIVE PLANESPOTTING -->
+<div class="heathrow-video-section">
+    <div class="section-title">📹 Heathrow Live Camera</div>
+
+    <div class="heathrow-video-details">
+        <details>
+            <summary>Open Heathrow planespotting video</summary>
+
+            <div class="heathrow-video-frame">
+                <iframe
+                    src="https://www.youtube-nocookie.com/embed/SgvpyjQX_HM?rel=0"
+                    title="Heathrow planespotting video"
+                    loading="lazy"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen>
+                </iframe>
+            </div>
+
+            <div class="heathrow-video-note">
+                Video playback depends on YouTube availability and
+                whether embedding is enabled.
+                <a
+                    href="https://www.youtube.com/watch?v=SgvpyjQX_HM"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style="color:#38bdf8;">
+                    Open on YouTube
+                </a>
+            </div>
+        </details>
+    </div>
+</div>
+
     <div class="stats">
 
         <div class="stat">
