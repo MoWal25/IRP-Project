@@ -339,6 +339,73 @@
                 left: 8px;
             }
         }
+        
+/* GLOBAL FLIGHT RADAR — INTELLIGENCE DASHBOARD */
+
+.intelligence-section {
+    margin-top: 15px;
+    padding-top: 12px;
+    border-top: 1px solid #273449;
+}
+
+.intelligence-card {
+    background: #111827;
+    border: 1px solid #273449;
+    border-radius: 9px;
+    padding: 11px;
+    margin-top: 9px;
+    overflow-wrap: anywhere;
+}
+
+.intelligence-heading {
+    font-size: 12px;
+    font-weight: bold;
+    color: #e2e8f0;
+    margin-bottom: 8px;
+}
+
+.intelligence-value {
+    font-size: 19px;
+    font-weight: bold;
+    color: #38bdf8;
+}
+
+.intelligence-detail {
+    font-size: 11px;
+    line-height: 1.6;
+    color: #94a3b8;
+    margin-top: 5px;
+}
+
+.intelligence-list {
+    font-size: 11px;
+    line-height: 1.7;
+    color: #cbd5e1;
+    overflow-wrap: anywhere;
+}
+
+.intelligence-loading {
+    color: #94a3b8;
+    font-size: 11px;
+}
+
+.intelligence-warning {
+    color: #fbbf24;
+}
+
+.intelligence-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.intelligence-button {
+    margin-top: 8px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    font-size: 11px;
+}
+
     </style>
 </head>
 
@@ -425,6 +492,87 @@
     <div class="live" id="liveStatus">
         ● Connecting to flight data...
     </div>
+    
+<!-- AIRPORT WEATHER -->
+<div class="intelligence-section">
+    <div class="section-title">🌦️ Airport Weather Intelligence</div>
+
+    <div class="intelligence-card">
+        <div class="intelligence-heading" id="weatherAirport">
+            Airport weather
+        </div>
+        <div class="intelligence-value" id="weatherTemperature">--</div>
+        <div class="intelligence-detail" id="weatherDescription">
+            Loading weather...
+        </div>
+        <div class="intelligence-detail" id="weatherWind">Wind: --</div>
+        <div class="intelligence-detail" id="weatherVisibility">
+            Visibility: --
+        </div>
+    </div>
+</div>
+
+<!-- AIRPORT ACTIVITY -->
+<div class="intelligence-section">
+    <div class="section-title">📊 Airport Activity Scoreboard</div>
+
+    <div class="intelligence-card">
+        <div class="intelligence-grid">
+            <div>
+                <div class="intelligence-detail">Aircraft nearby</div>
+                <div class="intelligence-value" id="activityAircraft">--</div>
+            </div>
+            <div>
+                <div class="intelligence-detail">Recorded in 24h</div>
+                <div class="intelligence-value" id="activityRecords">--</div>
+            </div>
+        </div>
+        <div class="intelligence-detail" id="activityPhases">
+            Loading activity...
+        </div>
+    </div>
+</div>
+
+<!-- DATA CONFIDENCE -->
+<div class="intelligence-section">
+    <div class="section-title">📡 Live Data Confidence</div>
+
+    <div class="intelligence-card">
+        <div class="intelligence-value" id="confidenceStatus">CHECKING</div>
+        <div class="intelligence-detail" id="confidenceDetails">
+            Checking the latest data timestamp...
+        </div>
+    </div>
+</div>
+
+<!-- FLIGHT EVENTS -->
+<div class="intelligence-section">
+    <div class="section-title">🧭 Interesting Flight Events</div>
+
+    <div class="intelligence-card">
+        <div class="intelligence-list" id="flightEvents">
+            Loading observed flight patterns...
+        </div>
+        <div class="intelligence-detail">
+            These are telemetry patterns, not confirmed emergencies.
+        </div>
+    </div>
+</div>
+
+<!-- HISTORICAL TRAFFIC -->
+<div class="intelligence-section">
+    <div class="section-title">📈 Historical Traffic Patterns</div>
+
+    <div class="intelligence-card">
+        <div class="intelligence-list" id="trafficPredictions">
+            Loading historical patterns...
+        </div>
+        <div class="intelligence-detail">
+            Estimates based on recorded observations, not scheduled flights.
+        </div>
+    </div>
+</div>
+
 
     <div class="section-title">Flight Search</div>
 
@@ -1807,6 +1955,393 @@ document.getElementById("airportSelect").addEventListener(
 loadAirportBoard();
 
 setInterval(loadAirportBoard, 60000);
+
+/* =========================================================
+   GLOBAL FLIGHT RADAR — INTELLIGENCE API CONNECTIONS
+========================================================= */
+
+async function intelligenceFetch(url) {
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error || "Request failed");
+    }
+
+    return data;
+}
+
+function intelligenceText(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+        element.textContent =
+            value === null || value === undefined || value === ""
+                ? "Not available"
+                : value;
+    }
+}
+
+function intelligenceNumber(value, suffix = "") {
+    const number = Number(value);
+
+    return value !== null &&
+           value !== undefined &&
+           value !== "" &&
+           Number.isFinite(number)
+        ? `${number.toLocaleString()}${suffix}`
+        : "Not available";
+}
+
+/* WEATHER */
+
+async function loadIntelligenceWeather() {
+    const airport = currentAirportCode;
+
+    try {
+        const data = await intelligenceFetch(
+            `/api/airport-weather?airport=${encodeURIComponent(airport)}`
+        );
+
+        if (airport !== currentAirportCode) return;
+
+        intelligenceText("weatherAirport", data.airport || airport);
+
+        intelligenceText(
+            "weatherTemperature",
+            data.temperature_c != null
+                ? `${data.temperature_c} °C`
+                : "Temperature unavailable"
+        );
+
+        const weatherDetails = [];
+
+        if (data.conditions) {
+            weatherDetails.push(data.conditions);
+        }
+
+        if (data.humidity_percent != null) {
+            weatherDetails.push(`Humidity ${data.humidity_percent}%`);
+        }
+
+        if (data.feels_like_c != null) {
+            weatherDetails.push(`Feels like ${data.feels_like_c} °C`);
+        }
+
+        intelligenceText(
+            "weatherDescription",
+            weatherDetails.length
+                ? weatherDetails.join(" · ")
+                : "Conditions unavailable"
+        );
+
+        const windDetails = [];
+
+        if (data.wind_speed_kmh != null) {
+            windDetails.push(`${data.wind_speed_kmh} km/h`);
+        }
+
+        if (data.wind_direction_degrees != null) {
+            windDetails.push(`${data.wind_direction_degrees}°`);
+        }
+
+        intelligenceText(
+            "weatherWind",
+            windDetails.length
+                ? `Wind: ${windDetails.join(" · ")}`
+                : "Wind: Not available"
+        );
+
+        const visibility = Number(data.visibility_m);
+
+        intelligenceText(
+            "weatherVisibility",
+            data.visibility_m != null && Number.isFinite(visibility)
+                ? `Visibility: ${(visibility / 1000).toFixed(1)} km`
+                : "Visibility: Not available"
+        );
+
+    } catch (error) {
+        intelligenceText("weatherTemperature", "--");
+        intelligenceText(
+            "weatherDescription",
+            "Weather unavailable: " + error.message
+        );
+        intelligenceText("weatherWind", "Wind: Not available");
+        intelligenceText("weatherVisibility", "Visibility: Not available");
+    }
+}
+
+
+/* ACTIVITY SCOREBOARD */
+
+async function loadIntelligenceActivity() {
+    const airport = currentAirportCode;
+
+    try {
+        const data = await intelligenceFetch("/api/airport-activity");
+
+        if (airport !== currentAirportCode) return;
+
+        const airports = Array.isArray(data.airports)
+            ? data.airports
+            : [];
+
+        const activity = airports.find(
+            item => item.airport_code === airport
+        );
+
+        if (!activity) {
+            intelligenceText("activityAircraft", "--");
+            intelligenceText("activityRecords", "--");
+            intelligenceText(
+                "activityPhases",
+                `No activity summary returned for ${airport}.`
+            );
+            return;
+        }
+
+        intelligenceText(
+            "activityAircraft",
+            intelligenceNumber(activity.currently_cached_aircraft)
+        );
+
+        intelligenceText(
+            "activityRecords",
+            intelligenceNumber(activity.observations_last_24_hours)
+        );
+
+        intelligenceText(
+            "activityPhases",
+            `Climbing: ${activity.climbing ?? 0}` +
+            ` · Cruising: ${activity.cruising ?? 0}` +
+            ` · Descending: ${activity.descending ?? 0}` +
+            ` · Unknown: ${activity.unknown_phase ?? 0}`
+        );
+
+    } catch (error) {
+        intelligenceText("activityAircraft", "--");
+        intelligenceText("activityRecords", "--");
+        intelligenceText(
+            "activityPhases",
+            "Activity unavailable: " + error.message
+        );
+    }
+}
+
+
+/* DATA FRESHNESS */
+
+async function loadIntelligenceConfidence() {
+    const airport = currentAirportCode;
+
+    try {
+        const data = await intelligenceFetch("/api/data-confidence");
+
+        const airports = Array.isArray(data.airports)
+            ? data.airports
+            : [];
+
+        const confidence = airports.find(
+            item => item.airport_code === airport
+        );
+
+        if (!confidence) {
+            intelligenceText("confidenceStatus", "NO RECENT DATA");
+            intelligenceText(
+                "confidenceDetails",
+                `No confidence record returned for ${airport}.`
+            );
+            return;
+        }
+
+        const statusLabels = {
+            FRESH: "FRESH",
+            AGING: "AGING",
+            STALE: "STALE",
+            NO_RECENT_DATA: "NO RECENT DATA",
+            UNKNOWN: "UNKNOWN"
+        };
+
+        intelligenceText(
+            "confidenceStatus",
+            statusLabels[confidence.status] ||
+                confidence.status ||
+                "UNKNOWN"
+        );
+
+        if (confidence.seconds_since_successful_update != null) {
+            intelligenceText(
+                "confidenceDetails",
+                `Last successful update: ${
+                    intelligenceNumber(
+                        confidence.seconds_since_successful_update,
+                        " seconds ago"
+                    )
+                } · Aircraft cached: ${
+                    intelligenceNumber(confidence.cached_aircraft_count)
+                }`
+            );
+        } else {
+            intelligenceText(
+                "confidenceDetails",
+                `No successful update recorded for ${airport} yet. ` +
+                `Cached aircraft: ${
+                    intelligenceNumber(confidence.cached_aircraft_count)
+                }`
+            );
+        }
+
+    } catch (error) {
+        intelligenceText("confidenceStatus", "UNAVAILABLE");
+        intelligenceText("confidenceDetails", error.message);
+    }
+}
+
+
+/* OBSERVED FLIGHT EVENTS */
+
+async function loadIntelligenceEvents() {
+    const airport = currentAirportCode;
+
+    try {
+        const data = await intelligenceFetch(
+            `/api/flight-events?airport=${encodeURIComponent(airport)}`
+        );
+
+        if (airport !== currentAirportCode) return;
+
+        const events = Array.isArray(data.events)
+            ? data.events
+            : [];
+
+        const container = document.getElementById("flightEvents");
+
+        if (!container) return;
+
+        container.replaceChildren();
+
+        if (!events.length) {
+            container.textContent =
+                "No notable patterns detected in recent saved records. " +
+                "Leave the radar running to collect observations.";
+            return;
+        }
+
+        events.slice(0, 6).forEach(event => {
+            const item = document.createElement("div");
+
+            const label =
+                event.callsign || event.icao24 || "Aircraft";
+
+            let eventType;
+
+            if (event.type === "LARGE_HEADING_CHANGE") {
+                eventType =
+                    `Large heading change ` +
+                    `(${event.heading_change_degrees ?? "?"}°)`;
+            } else if (event.type === "LARGE_ALTITUDE_CHANGE") {
+                eventType =
+                    `Large altitude change ` +
+                    `(${event.altitude_change_m ?? "?"} m)`;
+            } else {
+                eventType =
+                    event.description ||
+                    event.type ||
+                    "Observed telemetry change";
+            }
+
+            item.textContent = `${label}: ${eventType}.`;
+
+            container.appendChild(item);
+        });
+
+    } catch (error) {
+        intelligenceText(
+            "flightEvents",
+            "Events unavailable: " + error.message
+        );
+    }
+}
+
+
+/* HISTORICAL TRAFFIC PATTERNS */
+
+async function loadIntelligencePredictions() {
+    const airport = currentAirportCode;
+
+    try {
+        const data = await intelligenceFetch(
+            `/api/airport-predictions?airport=${encodeURIComponent(airport)}`
+        );
+
+        if (airport !== currentAirportCode) return;
+
+        const container = document.getElementById("trafficPredictions");
+
+        if (!container) return;
+
+        container.replaceChildren();
+
+        // Match the actual "estimates" response from server.py.
+        const estimates = Array.isArray(data.estimates)
+            ? data.estimates
+            : [];
+
+        const predictions = estimates.filter(item =>
+            item.days_with_data > 0 &&
+            item.average_observations_per_recorded_hour != null
+        );
+
+        if (!predictions.length) {
+            container.textContent =
+                "No historical traffic pattern yet. Keep Global Flight " +
+                "Radar running to build saved observations.";
+            return;
+        }
+
+        predictions.slice(0, 8).forEach(item => {
+            const line = document.createElement("div");
+
+            line.textContent =
+                `${item.hour_utc}:00 UTC — ` +
+                `${item.average_observations_per_recorded_hour} ` +
+                `average observations across ${item.days_with_data} day(s)`;
+
+            container.appendChild(line);
+        });
+
+        const note = document.createElement("div");
+        note.className = "intelligence-detail";
+
+        note.textContent = data.note ||
+            "Historical averages of recorded observations, " +
+            "not scheduled arrival/departure predictions.";
+
+        container.appendChild(note);
+
+    } catch (error) {
+        intelligenceText(
+            "trafficPredictions",
+            "Historical patterns unavailable: " + error.message
+        );
+    }
+}
+/* REFRESH ALL INTELLIGENCE PANELS */
+
+async function loadIntelligenceDashboard() {
+    await Promise.allSettled([
+        loadIntelligenceWeather(),
+        loadIntelligenceActivity(),
+        loadIntelligenceConfidence(),
+        loadIntelligenceEvents(),
+        loadIntelligencePredictions()
+    ]);
+}
+
+loadIntelligenceDashboard();
+
+// Refresh intelligence separately from the 20-second radar polling.
+setInterval(loadIntelligenceDashboard, 60000);
 
 </script>
 

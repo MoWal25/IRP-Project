@@ -221,7 +221,7 @@ def setup_database():
         row[1] for row in cursor.fetchall()
     }
 
-    for column in ("airline", "origin", "destination"):
+    for column in ("airline", "origin", "destination","airport_code"):
         if column not in existing_columns:
             cursor.execute(
                 f"ALTER TABLE Flight_Logs ADD COLUMN {column} TEXT"
@@ -473,6 +473,7 @@ def get_live_aircraft(airport_code):
 # SAVE FLIGHTS TO DATABASE
 # ============================================================
 
+
 def save_flights_to_database(aircraft_list):
     if not aircraft_list:
         return
@@ -485,43 +486,35 @@ def save_flights_to_database(aircraft_list):
     for aircraft in aircraft_list:
         cursor.execute("""
             INSERT INTO Flight_Logs (
-                timestamp,
-                icao24,
-                callsign,
-                country,
-                latitude,
-                longitude,
-                altitude,
-                velocity,
-                heading,
-                vertical_rate,
-                flight_phase,
-                distance_from_airport,
-                airline,
-                origin,
-                destination
+                timestamp, icao24, callsign, country,
+                latitude, longitude, altitude, velocity,
+                heading, vertical_rate, flight_phase,
+                distance_from_airport, airline, origin,
+                destination, airport_code
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
-            aircraft["icao24"],
-            aircraft["callsign"],
-            aircraft["country"],
-            aircraft["latitude"],
-            aircraft["longitude"],
-            aircraft["altitude"],
-            aircraft["velocity"],
-            aircraft["heading"],
-            aircraft["vertical_rate"],
-            aircraft["flight_phase"],
-            aircraft["distance_from_airport"],
-            aircraft["airline"],
-            aircraft["origin"],
-            aircraft["destination"]
+            aircraft.get("icao24"),
+            aircraft.get("callsign"),
+            aircraft.get("country"),
+            aircraft.get("latitude"),
+            aircraft.get("longitude"),
+            aircraft.get("altitude"),
+            aircraft.get("velocity"),
+            aircraft.get("heading"),
+            aircraft.get("vertical_rate"),
+            aircraft.get("flight_phase"),
+            aircraft.get("distance_from_airport"),
+            aircraft.get("airline"),
+            aircraft.get("origin"),
+            aircraft.get("destination"),
+            aircraft.get("airport_code")
         ))
 
     connection.commit()
     connection.close()
+
 
 
 # ============================================================
@@ -1003,6 +996,509 @@ def api_adsblol_flights():
             "error": "Could not process backup flight data",
             "aircraft": []
         }), 500
+        
+# ============================================================
+# GLOBAL FLIGHT RADAR - INTELLIGENCE FEATURES
+# ============================================================
+
+from collections import defaultdict
+from statistics import mean
+
+WEATHER_CACHE = {}
+WEATHER_CACHE_TIME = {}
+WEATHER_CACHE_SECONDS = 600
+
+AIRPORT_WEATHER_TIMEZONES = {
+    "LHR": "Europe/London",
+    "DXB": "Asia/Dubai",
+    "JED": "Asia/Riyadh"
+}
+
+
+def get_weather_description(code):
+    descriptions = {
+        0: "Clear sky",
+        1: "Mainly clear",
+        2: "Partly cloudy",
+        3: "Overcast",
+        45: "Fog",
+        48: "Freezing fog",
+        51: "Light drizzle",
+        53: "Moderate drizzle",
+        55: "Heavy drizzle",
+        61: "Light rain",
+        63: "Moderate rain",
+        65: "Heavy rain",
+        71: "Light snow",
+        73: "Moderate snow",
+        75: "Heavy snow",
+        80: "Rain showers",
+        81: "Moderate rain showers",
+        82: "Heavy rain showers",
+        95: "Thunderstorm",
+        96: "Thunderstorm with hail",
+        99: "Severe thunderstorm with hail"
+    }
+    return descriptions.get(code, "Conditions unavailable")
+
+
+# ------------------------------------------------------------
+# 1. AIRPORT WEATHER INTELLIGENCE
+# Uses Open-Meteo public weather data; no API key required.
+# ------------------------------------------------------------
+
+@app.route("/api/airport-weather")
+def api_airport_weather():
+    airport_code = request.args.get(
+        "airport", DEFAULT_AIRPORT_CODE
+    ).strip().upper()
+
+    if airport_code not in AIRPORTS:
+        return jsonify({
+            "error": "Unsupported airport",
+            "available_airports": list(AIRPORTS.keys())
+        }), 400
+
+    now = time.time()
+
+    if (
+        airport_code in WEATHER_CACHE
+        and now - WEATHER_CACHE_TIME.get(airport_code, 0)
+        < WEATHER_CACHE_SECONDS
+    ):
+        result = dict(WEATHER_CACHE[airport_code])
+        result["cached"] = True
+        return jsonify(result)
+
+    airport = AIRPORTS[airport_code]
+
+    try:
+        response = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": airport["lat"],
+                "longitude": airport["lon"],
+                "current": (
+                    "temperature_2m,relative_humidity_2m,"
+                    "apparent_temperature,is_day,precipitation,"
+                    "weather_code,cloud_cover,pressure_msl,"
+                    "wind_speed_10m,wind_direction_10m,visibility"
+                ),
+                "timezone": AIRPORT_WEATHER_TIMEZONES[airport_code]
+            },
+            timeout=15
+        )
+        response.raise_for_status()
+        data = response.json()
+        current = data.get("current", {})
+
+        weather_code = current.get("weather_code")
+
+        result = {
+            "airport_code": airport_code,
+            "airport": airport["name"],
+            "source": "Open-Meteo",
+            "cached": False,
+            "observed_at": current.get("time"),
+            "temperature_c": current.get("temperature_2m"),
+            "feels_like_c": current.get("apparent_temperature"),
+            "humidity_percent": current.get(
+                "relative_humidity_2m"
+            ),
+            "weather_code": weather_code,
+            "conditions": get_weather_description(weather_code),
+            "wind_speed_kmh": current.get("wind_speed_10m"),
+            "wind_direction_degrees": current.get(
+                "wind_direction_10m"
+            ),
+            "visibility_m": current.get("visibility"),
+            "cloud_cover_percent": current.get("cloud_cover"),
+            "pressure_hpa": current.get("pressure_msl"),
+            "precipitation_mm": current.get("precipitation"),
+            "is_day": current.get("is_day")
+        }
+
+        WEATHER_CACHE[airport_code] = result
+        WEATHER_CACHE_TIME[airport_code] = now
+
+        return jsonify(result)
+
+    except (requests.RequestException, ValueError) as error:
+        app.logger.warning("Weather request failed: %s", error)
+        return jsonify({
+            "error": "Weather data is temporarily unavailable",
+            "airport_code": airport_code
+        }), 502
+
+
+# ------------------------------------------------------------
+# 2 AND 4. AIRPORT ACTIVITY AND TRAFFIC SUMMARY
+# ------------------------------------------------------------
+
+@app.route("/api/airport-activity")
+def api_airport_activity():
+    results = []
+
+    connection = sqlite3.connect(DATABASE)
+    cursor = connection.cursor()
+
+    for code, airport in AIRPORTS.items():
+        aircraft = aircraft_cache.get(code, [])
+
+        phases = defaultdict(int)
+
+        for plane in aircraft:
+            phases[plane.get("flight_phase", "UNKNOWN")] += 1
+
+        cursor.execute("""
+            SELECT COUNT(*), COUNT(DISTINCT icao24)
+            FROM Flight_Logs
+            WHERE airport_code = ?
+              AND timestamp >= datetime('now', '-24 hours')
+        """, (code,))
+
+        row = cursor.fetchone()
+
+        results.append({
+            "airport_code": code,
+            "airport": airport["name"],
+            "currently_cached_aircraft": len(aircraft),
+            "climbing": phases["CLIMBING"],
+            "cruising": phases["CRUISING"],
+            "descending": phases["DESCENDING"],
+            "unknown_phase": phases["UNKNOWN"],
+            "ground": phases["GROUND"],
+            "observations_last_24_hours": row[0] or 0,
+            "unique_aircraft_logged_last_24_hours": row[1] or 0,
+            "note": (
+                "Cached aircraft are not necessarily a complete "
+                "count of airport arrivals or departures."
+            )
+        })
+
+    connection.close()
+
+    return jsonify({
+        "airports": results,
+        "source": "OpenSky observations and local SQLite history"
+    })
+
+
+# ------------------------------------------------------------
+# 6. MOVEMENT ANOMALY / INTERESTING EVENT DETECTOR
+# These are data-pattern flags, not safety or emergency alerts.
+# ------------------------------------------------------------
+
+@app.route("/api/flight-events")
+def api_flight_events():
+    airport_code = request.args.get(
+        "airport", DEFAULT_AIRPORT_CODE
+    ).strip().upper()
+
+    if airport_code not in AIRPORTS:
+        return jsonify({
+            "error": "Unsupported airport",
+            "available_airports": list(AIRPORTS.keys())
+        }), 400
+
+    connection = sqlite3.connect(DATABASE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT icao24, callsign, timestamp, altitude,
+               heading, velocity, vertical_rate, flight_phase
+        FROM Flight_Logs
+        WHERE airport_code = ?
+          AND timestamp >= datetime('now', '-30 minutes')
+        ORDER BY icao24, timestamp ASC
+    """, (airport_code,))
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    by_aircraft = defaultdict(list)
+
+    for row in rows:
+        by_aircraft[row[0]].append(row)
+
+    events = []
+
+    for icao24, history in by_aircraft.items():
+        if len(history) < 2:
+            continue
+
+        previous = history[-2]
+        current = history[-1]
+
+        _, callsign, timestamp, altitude, heading, velocity, vertical_rate, phase = current
+        _, _, previous_timestamp, previous_altitude, previous_heading, _, _, _ = previous
+
+        if (
+            heading is not None
+            and previous_heading is not None
+        ):
+            turn = abs(heading - previous_heading)
+            turn = min(turn, 360 - turn)
+
+            if turn >= 90:
+                events.append({
+                    "icao24": icao24,
+                    "callsign": callsign,
+                    "type": "LARGE_HEADING_CHANGE",
+                    "description": (
+                        "Heading changed by at least 90 degrees "
+                        "between recorded observations."
+                    ),
+                    "heading_change_degrees": round(turn, 1),
+                    "observed_at": timestamp,
+                    "severity": "INFO"
+                })
+
+        if (
+            altitude is not None
+            and previous_altitude is not None
+            and abs(altitude - previous_altitude) >= 1500
+        ):
+            events.append({
+                "icao24": icao24,
+                "callsign": callsign,
+                "type": "LARGE_ALTITUDE_CHANGE",
+                "description": (
+                    "Altitude differed by at least 1500 metres "
+                    "between recorded observations."
+                ),
+                "altitude_change_m": round(
+                    altitude - previous_altitude, 1
+                ),
+                "observed_at": timestamp,
+                "severity": "INFO"
+            })
+
+    return jsonify({
+        "airport_code": airport_code,
+        "events": events,
+        "count": len(events),
+        "note": (
+            "These are automatically detected data patterns, "
+            "not evidence of an emergency or unsafe flight."
+        )
+    })
+
+
+# ------------------------------------------------------------
+# 7. DATA FRESHNESS / CONFIDENCE
+# ------------------------------------------------------------
+
+@app.route("/api/data-confidence")
+def api_data_confidence():
+    now = datetime.now(timezone.utc)
+    results = []
+
+    for code, airport in AIRPORTS.items():
+        last_update = last_successful_time.get(code)
+        age_seconds = None
+        status = "NO_RECENT_DATA"
+
+        if last_update:
+            try:
+                parsed = datetime.fromisoformat(
+                    last_update.replace("Z", "+00:00")
+                )
+
+                age_seconds = max(
+                    0, int((now - parsed).total_seconds())
+                )
+
+                if age_seconds <= 60:
+                    status = "FRESH"
+                elif age_seconds <= 300:
+                    status = "AGING"
+                else:
+                    status = "STALE"
+
+            except (ValueError, TypeError):
+                status = "UNKNOWN"
+
+        results.append({
+            "airport_code": code,
+            "airport": airport["name"],
+            "status": status,
+            "seconds_since_successful_update": age_seconds,
+            "last_successful_update": last_update,
+            "cached_aircraft_count": len(
+                aircraft_cache.get(code, [])
+            )
+        })
+
+    return jsonify({"airports": results})
+
+
+# ------------------------------------------------------------
+# 8. SIMPLE HISTORICAL TRAFFIC ESTIMATES
+# Uses recorded observations, not scheduled flight counts.
+# ------------------------------------------------------------
+
+@app.route("/api/airport-predictions")
+def api_airport_predictions():
+    airport_code = request.args.get(
+        "airport", DEFAULT_AIRPORT_CODE
+    ).strip().upper()
+
+    if airport_code not in AIRPORTS:
+        return jsonify({
+            "error": "Unsupported airport",
+            "available_airports": list(AIRPORTS.keys())
+        }), 400
+
+    connection = sqlite3.connect(DATABASE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            date(timestamp) AS day,
+            strftime('%H', timestamp) AS hour,
+            COUNT(*) AS observations
+        FROM Flight_Logs
+        WHERE airport_code = ?
+          AND timestamp >= datetime('now', '-14 days')
+        GROUP BY day, hour
+        ORDER BY day, hour
+    """, (airport_code,))
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    hourly_values = defaultdict(list)
+
+    for day, hour, count in rows:
+        if hour is not None:
+            hourly_values[hour].append(count)
+
+    estimates = []
+
+    for hour in range(24):
+        key = f"{hour:02d}"
+        values = hourly_values.get(key, [])
+
+        estimates.append({
+            "hour_utc": key,
+            "average_observations_per_recorded_hour": (
+                round(mean(values), 2) if values else None
+            ),
+            "days_with_data": len(values)
+        })
+
+    return jsonify({
+        "airport_code": airport_code,
+        "historical_days_requested": 14,
+        "estimates": estimates,
+        "note": (
+            "These are averages of recorded aircraft observations "
+            "per UTC hour, not predictions of flight departures "
+            "or arrivals. Sparse history makes estimates unreliable."
+        )
+    })
+
+
+# ------------------------------------------------------------
+# 9. EXPLAINABLE FLIGHT INSIGHTS
+# ------------------------------------------------------------
+
+@app.route("/api/flight-insights/<flight_number>")
+def api_flight_insights(flight_number):
+    search_value = flight_number.strip().upper()
+
+    connection = sqlite3.connect(DATABASE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT timestamp, callsign, icao24, altitude, velocity,
+               heading, vertical_rate, flight_phase, airport_code
+        FROM Flight_Logs
+        WHERE UPPER(callsign) = ? OR UPPER(icao24) = ?
+        ORDER BY id DESC
+        LIMIT 10
+    """, (search_value, search_value))
+
+    rows = cursor.fetchall()
+    connection.close()
+
+    if not rows:
+        return jsonify({
+            "found": False,
+            "flight_number": search_value,
+            "insights": [],
+            "message": (
+                "No saved observations found. Keep the radar running "
+                "to collect history for this aircraft."
+            )
+        })
+
+    latest = rows[0]
+    timestamp, callsign, icao24, altitude, velocity, heading, vertical_rate, phase, airport_code = latest
+
+    insights = []
+
+    if altitude is not None:
+        insights.append(
+            f"Recorded altitude: {altitude:,.0f} metres."
+        )
+
+    if velocity is not None:
+        insights.append(
+            f"Recorded ground speed: {velocity * 3.6:,.0f} km/h."
+        )
+
+    if heading is not None:
+        insights.append(
+            f"Recorded heading: {heading:.0f} degrees."
+        )
+
+    if vertical_rate is not None:
+        rate_ft_min = vertical_rate * 196.8504
+
+        if rate_ft_min > 100:
+            movement = "climbing"
+        elif rate_ft_min < -100:
+            movement = "descending"
+        else:
+            movement = "showing little vertical movement"
+
+        insights.append(
+            f"The latest vertical rate indicates the aircraft is "
+            f"{movement} (about {rate_ft_min:,.0f} ft/min)."
+        )
+
+    if len(rows) >= 2:
+        previous = rows[1]
+
+        if (
+            altitude is not None
+            and previous[3] is not None
+        ):
+            change = altitude - previous[3]
+
+            insights.append(
+                f"Altitude changed by {change:+,.0f} metres "
+                "since the previous saved observation."
+            )
+
+    return jsonify({
+        "found": True,
+        "flight_number": callsign or search_value,
+        "icao24": icao24,
+        "airport_code": airport_code,
+        "last_recorded_at": timestamp,
+        "flight_phase": phase,
+        "observations_returned": len(rows),
+        "origin": None,
+        "destination": None,
+        "insights": insights,
+        "note": (
+            "Insights describe saved observations. They do not "
+            "confirm origin, destination, or flight safety."
+        )
+    })
 
 if __name__ == "__main__":
     setup_database()
