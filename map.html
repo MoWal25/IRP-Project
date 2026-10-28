@@ -108,8 +108,7 @@
             border-radius: 9px;
             padding: 10px;
         }
-
-        .stat-title {
+  .stat-title {
             font-size: 11px;
             color: #94a3b8;
         }
@@ -208,8 +207,7 @@
             color: #94a3b8;
             text-transform: uppercase;
         }
-
-        .route-value {
+  .route-value {
             font-size: 14px;
             font-weight: bold;
             margin-top: 6px;
@@ -291,7 +289,6 @@
             font-size: 23px;
             text-shadow: 0 0 5px #000;
         }
-
         .loading {
             position: fixed;
             bottom: 20px;
@@ -405,6 +402,37 @@
     border: 1px solid #334155;
     font-size: 11px;
 }
+
+
+
+        /* Aviation news + aircraft reference */
+        .news-panel, .aircraft-specs-panel {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid #273449;
+        }
+        .news-card {
+            background: #111827;
+            border: 1px solid #273449;
+            border-radius: 9px;
+            padding: 10px;
+            margin: 8px 0;
+        }
+        .news-card a { color: #7dd3fc; text-decoration: none; font-weight: bold; font-size: 12px; line-height: 1.45; }
+        .news-card a:hover { text-decoration: underline; }
+        .news-meta { color: #94a3b8; font-size: 10px; margin-top: 5px; }
+        .news-summary { color: #cbd5e1; font-size: 11px; margin-top: 6px; line-height: 1.45; }
+        .news-controls { display: flex; gap: 7px; align-items: center; }
+        .news-controls button { flex: 1; }
+        .mini-note { color: #94a3b8; font-size: 10px; line-height: 1.45; margin-top: 7px; }
+        .aircraft-specs-box { background: #111827; border: 1px solid #273449; border-radius: 9px; padding: 10px; margin-top: 8px; }
+        .spec-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #263244; padding: 7px 0; font-size: 11px; }
+        .spec-row:last-child { border-bottom: 0; }
+        .spec-row span:first-child { color: #94a3b8; }
+        .spec-row span:last-child { text-align: right; font-weight: bold; }
+        .aircraft-specs-panel select { margin-top: 7px; }
+        .secondary-button { background: #334155; }
+        .secondary-button:hover { background: #475569; }
 
     </style>
 </head>
@@ -584,6 +612,42 @@
 
     <button onclick="searchFlight()">🔎 Search Flight</button>
 
+    <!-- AVIATION NEWS AND ROUTE UPDATES -->
+    <div class="news-panel">
+        <div class="section-title">📰 Aviation News & Route Updates</div>
+        <div class="news-controls">
+            <button onclick="loadAviationNews()">↻ Refresh news</button>
+        </div>
+        <div class="mini-note" id="newsStatus">Loading public aviation news feeds...</div>
+        <div id="aviationNewsList"></div>
+        <div class="mini-note">Headlines and route announcements are reported news, not confirmation of live operational routes. Articles open on their original publishers' websites.</div>
+    </div>
+
+    <!-- AIRCRAFT TYPE REFERENCE -->
+    <div class="aircraft-specs-panel">
+        <div class="section-title">🛩️ Aircraft Type Reference</div>
+        <label for="aircraftModelSelect" style="font-size:11px;color:#94a3b8;">Explore an aircraft model</label>
+        <select id="aircraftModelSelect" onchange="showReferenceAircraft(this.value)">
+            <option value="A320">Airbus A320 family</option>
+            <option value="A20N">Airbus A320neo</option>
+            <option value="A21N">Airbus A321neo</option>
+            <option value="A333">Airbus A330-300</option>
+            <option value="A359">Airbus A350-900</option>
+            <option value="A388">Airbus A380-800</option>
+            <option value="B738">Boeing 737-800</option>
+            <option value="B38M">Boeing 737 MAX 8</option>
+            <option value="B77W">Boeing 777-300ER</option>
+            <option value="B788">Boeing 787-8</option>
+            <option value="B789">Boeing 787-9</option>
+            <option value="E190">Embraer E190</option>
+            <option value="E75L">Embraer E175</option>
+            <option value="AT76">ATR 72-600</option>
+        </select>
+        <div id="aircraftReferenceDetails" class="aircraft-specs-box"></div>
+        <div class="mini-note">Model-level estimates. Actual seat count depends on airline configuration. Select a live aircraft to attempt a registration/type lookup when registry data is available.</div>
+    </div>
+
+
     <div class="legend">
 
         <div class="section-title">Flight Phase</div>
@@ -677,6 +741,13 @@
             <div class="info-value" id="summaryICAO">Unknown</div>
         </div>
 
+    </div>
+
+
+    <div class="history-section" id="liveAircraftSpecsSection">
+        <strong>🛩️ Aircraft information</strong>
+        <div class="history-subtitle" id="liveAircraftSpecsStatus">Select an aircraft marker to look up aircraft type details.</div>
+        <div id="liveAircraftSpecs" class="aircraft-specs-box"></div>
     </div>
 
     <div class="history-section">
@@ -1302,6 +1373,7 @@ function showFlightInfo(flight) {
     document.getElementById("infoPanel").style.display = "block";
 
     loadHistoricalFlight(number);
+    loadLiveAircraftDetails(flight);
 }
 
 
@@ -2343,6 +2415,162 @@ loadIntelligenceDashboard();
 // Refresh intelligence separately from the 20-second radar polling.
 setInterval(loadIntelligenceDashboard, 60000);
 
+
+
+// ==========================================================
+// AVIATION NEWS FEED
+// ==========================================================
+function safeText(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[char]));
+}
+
+function formatNewsDate(value) {
+    if (!value) return "Date not provided";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+async function loadAviationNews() {
+    const list = document.getElementById("aviationNewsList");
+    const status = document.getElementById("newsStatus");
+    if (!list || !status) return;
+    status.textContent = "Checking public aviation news feeds...";
+    try {
+        const response = await fetch("/api/aviation-news", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "News request failed");
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) {
+            list.innerHTML = '<div class="news-card">News feeds are temporarily unavailable. Try refreshing in a little while.</div>';
+            status.textContent = "No headlines returned by the public feeds.";
+            return;
+        }
+        list.innerHTML = items.slice(0, 8).map(item => `
+            <div class="news-card">
+                <a href="${safeText(item.url)}" target="_blank" rel="noopener noreferrer">${safeText(item.title)}</a>
+                <div class="news-meta">${safeText(item.source || "Aviation news")} · ${safeText(formatNewsDate(item.published))}</div>
+                ${item.summary ? `<div class="news-summary">${safeText(item.summary)}</div>` : ""}
+            </div>
+        `).join("");
+        status.textContent = `Showing ${Math.min(items.length, 8)} headlines · Updated ${formatNewsDate(data.updated_at)}${data.cached ? " · cached" : ""}`;
+    } catch (error) {
+        console.error("Aviation news error:", error);
+        list.innerHTML = '<div class="news-card">Could not load the news feed right now. The radar itself will continue to work.</div>';
+        status.textContent = "News service unavailable; try again later.";
+    }
+}
+
+// ==========================================================
+// AIRCRAFT TYPE REFERENCE + LIVE AIRCRAFT LOOKUP
+// ==========================================================
+const AIRCRAFT_REFERENCE = {
+    A318:{manufacturer:"Airbus",model:"A318",category:"Narrow-body jet",seats:"107–132 typical",max_seats:"132 (configuration dependent)",range_km:5750,cruise_kmh:830,engines:2},
+    A319:{manufacturer:"Airbus",model:"A319",category:"Narrow-body jet",seats:"124–156 typical",max_seats:"Variant/configuration dependent",range_km:6900,cruise_kmh:830,engines:2},
+    A320:{manufacturer:"Airbus",model:"A320 family",category:"Narrow-body jet",seats:"140–180 typical",max_seats:"Variant/configuration dependent",range_km:6100,cruise_kmh:840,engines:2},
+    A20N:{manufacturer:"Airbus",model:"A320neo",category:"Narrow-body jet",seats:"150–186 typical",max_seats:"Variant/configuration dependent",range_km:6300,cruise_kmh:840,engines:2},
+    A21N:{manufacturer:"Airbus",model:"A321neo",category:"Narrow-body jet",seats:"180–220 typical",max_seats:"Up to 244, variant/configuration dependent",range_km:7400,cruise_kmh:840,engines:2},
+    A332:{manufacturer:"Airbus",model:"A330-200",category:"Wide-body jet",seats:"220–260 typical",max_seats:"Configuration dependent",range_km:13400,cruise_kmh:880,engines:2},
+    A333:{manufacturer:"Airbus",model:"A330-300",category:"Wide-body jet",seats:"250–300 typical",max_seats:"Configuration dependent",range_km:11750,cruise_kmh:880,engines:2},
+    A359:{manufacturer:"Airbus",model:"A350-900",category:"Wide-body jet",seats:"300–350 typical",max_seats:"Configuration dependent",range_km:15000,cruise_kmh:903,engines:2},
+    A35K:{manufacturer:"Airbus",model:"A350-1000",category:"Wide-body jet",seats:"350–410 typical",max_seats:"Configuration dependent",range_km:16100,cruise_kmh:903,engines:2},
+    A388:{manufacturer:"Airbus",model:"A380-800",category:"Very large wide-body jet",seats:"500–600 typical",max_seats:"853",range_km:15200,cruise_kmh:903,engines:4},
+    B737:{manufacturer:"Boeing",model:"737 family",category:"Narrow-body jet",seats:"130–189 typical",max_seats:"Variant/configuration dependent",range_km:5600,cruise_kmh:839,engines:2},
+    B738:{manufacturer:"Boeing",model:"737-800",category:"Narrow-body jet",seats:"162–189 typical",max_seats:"189 in a common single-class configuration",range_km:5435,cruise_kmh:839,engines:2},
+    B38M:{manufacturer:"Boeing",model:"737 MAX 8",category:"Narrow-body jet",seats:"162–178 typical",max_seats:"Configuration dependent",range_km:6570,cruise_kmh:839,engines:2},
+    B39M:{manufacturer:"Boeing",model:"737 MAX 9",category:"Narrow-body jet",seats:"178–193 typical",max_seats:"Configuration dependent",range_km:6570,cruise_kmh:839,engines:2},
+    B744:{manufacturer:"Boeing",model:"747-400",category:"Very large wide-body jet",seats:"416–524 typical",max_seats:"Configuration dependent",range_km:13450,cruise_kmh:920,engines:4},
+    B748:{manufacturer:"Boeing",model:"747-8",category:"Very large wide-body jet",seats:"410–467 typical",max_seats:"Configuration dependent",range_km:14300,cruise_kmh:920,engines:4},
+    B772:{manufacturer:"Boeing",model:"777-200",category:"Wide-body jet",seats:"300–400 typical",max_seats:"Configuration dependent",range_km:9700,cruise_kmh:905,engines:2},
+    B77W:{manufacturer:"Boeing",model:"777-300ER",category:"Wide-body jet",seats:"350–400 typical",max_seats:"Configuration dependent",range_km:13650,cruise_kmh:905,engines:2},
+    B788:{manufacturer:"Boeing",model:"787-8",category:"Wide-body jet",seats:"242–290 typical",max_seats:"Configuration dependent",range_km:13620,cruise_kmh:903,engines:2},
+    B789:{manufacturer:"Boeing",model:"787-9",category:"Wide-body jet",seats:"280–320 typical",max_seats:"Configuration dependent",range_km:14140,cruise_kmh:903,engines:2},
+    E190:{manufacturer:"Embraer",model:"E190",category:"Regional jet",seats:"96–114 typical",max_seats:"Configuration dependent",range_km:4500,cruise_kmh:829,engines:2},
+    E195:{manufacturer:"Embraer",model:"E195",category:"Regional jet",seats:"100–132 typical",max_seats:"Configuration dependent",range_km:4260,cruise_kmh:829,engines:2},
+    E75L:{manufacturer:"Embraer",model:"E175",category:"Regional jet",seats:"76–88 typical",max_seats:"Configuration dependent",range_km:3980,cruise_kmh:829,engines:2},
+    CRJ9:{manufacturer:"Bombardier",model:"CRJ-900",category:"Regional jet",seats:"76–90 typical",max_seats:"Configuration dependent",range_km:2876,cruise_kmh:830,engines:2},
+    DH8D:{manufacturer:"De Havilland Canada",model:"Dash 8 Q400",category:"Turboprop",seats:"70–78 typical",max_seats:"Configuration dependent",range_km:2500,cruise_kmh:667,engines:2},
+    AT76:{manufacturer:"ATR",model:"ATR 72-600",category:"Turboprop",seats:"68–78 typical",max_seats:"Configuration dependent",range_km:1528,cruise_kmh:510,engines:2}
+};
+
+function renderAircraftSpecBox(target, spec, extras = {}) {
+    if (!target) return;
+    if (!spec) {
+        target.innerHTML = '<div class="news-summary">Aircraft model specifications are not available for this type yet.</div>';
+        return;
+    }
+    const rows = [
+        ["Manufacturer", spec.manufacturer || extras.manufacturer || "Unknown"],
+        ["Aircraft model", spec.model || extras.model || "Unknown"],
+        ["Category", spec.category || extras.category || "Unknown"],
+        ["Typical seating", spec.seats || spec.typical_seats || "Unknown"],
+        ["Maximum seats", spec.max_seats || spec.maximum_seats || "Not verified"],
+        ["Range", spec.range_km ? `${Number(spec.range_km).toLocaleString()} km` : "Unknown"],
+        ["Cruise speed", spec.cruise_kmh ? `${Number(spec.cruise_kmh).toLocaleString()} km/h` : "Unknown"],
+        ["Engines", spec.engines || "Unknown"]
+    ];
+    target.innerHTML = rows.map(([label, value]) => `<div class="spec-row"><span>${safeText(label)}</span><span>${safeText(value)}</span></div>`).join("");
+}
+
+function showReferenceAircraft(typeCode) {
+    renderAircraftSpecBox(document.getElementById("aircraftReferenceDetails"), AIRCRAFT_REFERENCE[typeCode]);
+}
+
+async function loadLiveAircraftDetails(flight) {
+    const status = document.getElementById("liveAircraftSpecsStatus");
+    const box = document.getElementById("liveAircraftSpecs");
+    if (!status || !box) return;
+    const hex = flight && flight.icao24;
+    if (!hex) {
+        status.textContent = "This flight has no ICAO24 identifier for registry lookup.";
+        box.innerHTML = "";
+        return;
+    }
+    status.textContent = `Looking up aircraft registry for ${hex.toUpperCase()}...`;
+    box.innerHTML = "";
+    try {
+        const response = await fetch(`/api/aircraft-details/${encodeURIComponent(hex)}`);
+        const details = await response.json();
+        if (!response.ok) throw new Error(details.error || "Aircraft lookup failed");
+        const type = details.type_code;
+        const spec = (type && AIRCRAFT_REFERENCE[type]) ? AIRCRAFT_REFERENCE[type] : null;
+        const combined = spec || (details.model || details.registration ? {
+            manufacturer: details.manufacturer || "Unknown",
+            model: details.model || (type ? `Type ${type}` : "Model unavailable"),
+            category: details.category || "Unknown",
+            typical_seats: details.typical_seats,
+            maximum_seats: details.maximum_seats,
+            range_km: details.range_km,
+            cruise_kmh: details.cruise_kmh,
+            engines: details.engines
+        } : null);
+        if (combined) {
+            if (details.typical_seats) combined.seats = details.typical_seats;
+            if (details.maximum_seats) combined.max_seats = details.maximum_seats;
+            renderAircraftSpecBox(box, combined, details);
+            const meta = [details.registration ? `Registration ${details.registration}` : null,
+                          type ? `Type ${type}` : null,
+                          details.operator ? `Operator ${details.operator}` : null].filter(Boolean).join(" · ");
+            status.textContent = meta || "Registry information found; model specifications may be incomplete.";
+        } else {
+            box.innerHTML = '<div class="news-summary">No aircraft type was returned for this ICAO24 code. This is a data-source limitation, not a radar error.</div>';
+            status.textContent = "Aircraft registry did not identify the model.";
+        }
+    } catch (error) {
+        console.error("Aircraft details error:", error);
+        status.textContent = "Aircraft registry lookup is temporarily unavailable.";
+        box.innerHTML = '<div class="news-summary">The live flight data is still available. Try this lookup again later.</div>';
+    }
+}
+
+
+
+
+// Load the new optional panels; failures do not affect radar tracking.
+showReferenceAircraft(document.getElementById("aircraftModelSelect")?.value || "A320");
+loadAviationNews();
+setInterval(loadAviationNews, 15 * 60 * 1000);
 </script>
 
 </body>

@@ -4,6 +4,7 @@ import math
 import sqlite3
 import os
 import time
+import re
 from datetime import datetime, timezone
 
 app = Flask(__name__)
@@ -1499,6 +1500,186 @@ def api_flight_insights(flight_number):
             "confirm origin, destination, or flight safety."
         )
     })
+
+
+
+# ============================================================
+# AVIATION NEWS + AIRCRAFT SPECIFICATIONS
+# ============================================================
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+
+NEWS_CACHE = {"updated_at": 0, "items": []}
+NEWS_CACHE_SECONDS = 900
+AIRCRAFT_LOOKUP_CACHE = {}
+AIRCRAFT_LOOKUP_CACHE_SECONDS = 86400
+
+AVIATION_NEWS_FEEDS = [
+    ("Simple Flying", "https://simpleflying.com/feed/"),
+    ("EASA", "https://www.easa.europa.eu/en/rss.xml"),
+    ("Aviation Week", "https://aviationweek.com/air-transport/airports-networks/rss.xml")
+]
+
+# Typical seating ranges are estimates and vary by airline cabin layout.
+# Maximum certified capacity is included only where a commonly documented
+# figure is available; these are model-level references, not a specific plane's seat map.
+AIRCRAFT_SPECS = {
+    "A318": {"manufacturer": "Airbus", "model": "A318", "category": "Narrow-body jet", "seats": "107–132 typical", "max_seats": "132", "range_km": 5750, "cruise_kmh": 830, "engines": 2},
+    "A319": {"manufacturer": "Airbus", "model": "A319", "category": "Narrow-body jet", "seats": "124–156 typical", "max_seats": "160 (variant/configuration dependent)", "range_km": 6900, "cruise_kmh": 830, "engines": 2},
+    "A320": {"manufacturer": "Airbus", "model": "A320 family", "category": "Narrow-body jet", "seats": "140–180 typical", "max_seats": "194 (variant/configuration dependent)", "range_km": 6100, "cruise_kmh": 840, "engines": 2},
+    "A20N": {"manufacturer": "Airbus", "model": "A320neo", "category": "Narrow-body jet", "seats": "150–186 typical", "max_seats": "194 (variant/configuration dependent)", "range_km": 6300, "cruise_kmh": 840, "engines": 2},
+    "A21N": {"manufacturer": "Airbus", "model": "A321neo", "category": "Narrow-body jet", "seats": "180–220 typical", "max_seats": "244 (certified maximum, configuration dependent)", "range_km": 7400, "cruise_kmh": 840, "engines": 2},
+    "A332": {"manufacturer": "Airbus", "model": "A330-200", "category": "Wide-body jet", "seats": "220–260 typical", "max_seats": "Model/configuration dependent", "range_km": 13400, "cruise_kmh": 880, "engines": 2},
+    "A333": {"manufacturer": "Airbus", "model": "A330-300", "category": "Wide-body jet", "seats": "250–300 typical", "max_seats": "Model/configuration dependent", "range_km": 11750, "cruise_kmh": 880, "engines": 2},
+    "A359": {"manufacturer": "Airbus", "model": "A350-900", "category": "Wide-body jet", "seats": "300–350 typical", "max_seats": "Model/configuration dependent", "range_km": 15000, "cruise_kmh": 903, "engines": 2},
+    "A35K": {"manufacturer": "Airbus", "model": "A350-1000", "category": "Wide-body jet", "seats": "350–410 typical", "max_seats": "Model/configuration dependent", "range_km": 16100, "cruise_kmh": 903, "engines": 2},
+    "A388": {"manufacturer": "Airbus", "model": "A380-800", "category": "Very large wide-body jet", "seats": "500–600 typical", "max_seats": "853", "range_km": 15200, "cruise_kmh": 903, "engines": 4},
+    "B737": {"manufacturer": "Boeing", "model": "737 family", "category": "Narrow-body jet", "seats": "130–189 typical", "max_seats": "Model/variant dependent", "range_km": 5600, "cruise_kmh": 839, "engines": 2},
+    "B738": {"manufacturer": "Boeing", "model": "737-800", "category": "Narrow-body jet", "seats": "162–189 typical", "max_seats": "189 (common single-class configuration)", "range_km": 5435, "cruise_kmh": 839, "engines": 2},
+    "B38M": {"manufacturer": "Boeing", "model": "737 MAX 8", "category": "Narrow-body jet", "seats": "162–178 typical", "max_seats": "Model/configuration dependent", "range_km": 6570, "cruise_kmh": 839, "engines": 2},
+    "B39M": {"manufacturer": "Boeing", "model": "737 MAX 9", "category": "Narrow-body jet", "seats": "178–193 typical", "max_seats": "Model/configuration dependent", "range_km": 6570, "cruise_kmh": 839, "engines": 2},
+    "B744": {"manufacturer": "Boeing", "model": "747-400", "category": "Very large wide-body jet", "seats": "416–524 typical", "max_seats": "Model/configuration dependent", "range_km": 13450, "cruise_kmh": 920, "engines": 4},
+    "B748": {"manufacturer": "Boeing", "model": "747-8", "category": "Very large wide-body jet", "seats": "410–467 typical", "max_seats": "Model/configuration dependent", "range_km": 14300, "cruise_kmh": 920, "engines": 4},
+    "B772": {"manufacturer": "Boeing", "model": "777-200", "category": "Wide-body jet", "seats": "300–400 typical", "max_seats": "Model/configuration dependent", "range_km": 9700, "cruise_kmh": 905, "engines": 2},
+    "B77W": {"manufacturer": "Boeing", "model": "777-300ER", "category": "Wide-body jet", "seats": "350–400 typical", "max_seats": "Model/configuration dependent", "range_km": 13650, "cruise_kmh": 905, "engines": 2},
+    "B788": {"manufacturer": "Boeing", "model": "787-8", "category": "Wide-body jet", "seats": "242–290 typical", "max_seats": "Model/configuration dependent", "range_km": 13620, "cruise_kmh": 903, "engines": 2},
+    "B789": {"manufacturer": "Boeing", "model": "787-9", "category": "Wide-body jet", "seats": "280–320 typical", "max_seats": "Model/configuration dependent", "range_km": 14140, "cruise_kmh": 903, "engines": 2},
+    "E190": {"manufacturer": "Embraer", "model": "E190", "category": "Regional jet", "seats": "96–114 typical", "max_seats": "Model/configuration dependent", "range_km": 4500, "cruise_kmh": 829, "engines": 2},
+    "E195": {"manufacturer": "Embraer", "model": "E195", "category": "Regional jet", "seats": "100–132 typical", "max_seats": "Model/configuration dependent", "range_km": 4260, "cruise_kmh": 829, "engines": 2},
+    "E75L": {"manufacturer": "Embraer", "model": "E175", "category": "Regional jet", "seats": "76–88 typical", "max_seats": "Model/configuration dependent", "range_km": 3980, "cruise_kmh": 829, "engines": 2},
+    "CRJ9": {"manufacturer": "Bombardier", "model": "CRJ-900", "category": "Regional jet", "seats": "76–90 typical", "max_seats": "Model/configuration dependent", "range_km": 2876, "cruise_kmh": 830, "engines": 2},
+    "DH8D": {"manufacturer": "De Havilland Canada", "model": "Dash 8 Q400", "category": "Turboprop", "seats": "70–78 typical", "max_seats": "Model/configuration dependent", "range_km": 2500, "cruise_kmh": 667, "engines": 2},
+    "AT76": {"manufacturer": "ATR", "model": "ATR 72-600", "category": "Turboprop", "seats": "68–78 typical", "max_seats": "Model/configuration dependent", "range_km": 1528, "cruise_kmh": 510, "engines": 2}
+}
+
+
+def _xml_text(item, names):
+    for name in names:
+        node = item.find(name)
+        if node is not None and node.text:
+            return node.text.strip()
+    # Atom namespaces
+    for node in item.iter():
+        if node.tag.split("}")[-1] in names and node.text:
+            return node.text.strip()
+    return ""
+
+
+def _news_date(value):
+    if not value:
+        return ""
+    try:
+        return parsedate_to_datetime(value).isoformat()
+    except Exception:
+        return value
+
+
+@app.route("/api/aviation-news")
+def api_aviation_news():
+    now = time.time()
+    if NEWS_CACHE["items"] and now - NEWS_CACHE["updated_at"] < NEWS_CACHE_SECONDS:
+        return jsonify({"items": NEWS_CACHE["items"], "cached": True,
+                        "updated_at": datetime.fromtimestamp(NEWS_CACHE["updated_at"], timezone.utc).isoformat()})
+
+    items = []
+    for source_name, feed_url in AVIATION_NEWS_FEEDS:
+        try:
+            response = requests.get(
+                feed_url,
+                headers={"User-Agent": "GlobalFlightRadar/1.0 (aviation news reader)"},
+                timeout=7
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+            entries = [node for node in root.iter() if node.tag.split("}")[-1] in ("item", "entry")]
+            for entry in entries[:12]:
+                title = _xml_text(entry, ["title"])
+                link = ""
+                link_node = next((n for n in entry.iter() if n.tag.split("}")[-1] == "link"), None)
+                if link_node is not None:
+                    link = (link_node.attrib.get("href") or link_node.text or "").strip()
+                if not title or not link or not link.startswith(("https://", "http://")):
+                    continue
+                summary = _xml_text(entry, ["description", "summary", "content"])
+                summary = re.sub(r"<[^>]+>", " ", summary)
+                summary = re.sub(r"\s+", " ", summary).strip()
+                pubdate = _xml_text(entry, ["pubDate", "published", "updated", "date"])
+                category = _xml_text(entry, ["category"]) or "Aviation"
+                items.append({"title": title, "url": link, "source": source_name,
+                              "published": _news_date(pubdate), "summary": summary[:350],
+                              "category": category})
+        except Exception as error:
+            print(f"Aviation news feed failed ({source_name}): {error}")
+
+    # Deduplicate on article URL and sort newest-first when dates are parseable.
+    unique = {}
+    for item in items:
+        unique[item["url"]] = item
+    items = list(unique.values())
+    def _sort_key(item):
+        try:
+            return parsedate_to_datetime(item["published"]).timestamp()
+        except Exception:
+            try:
+                return datetime.fromisoformat(item["published"].replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0
+    items.sort(key=_sort_key, reverse=True)
+    items = items[:30]
+    NEWS_CACHE["items"] = items
+    NEWS_CACHE["updated_at"] = now
+    return jsonify({"items": items, "cached": False,
+                    "updated_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                    "message": "News depends on the availability of public RSS feeds." if not items else None})
+
+
+@app.route("/api/aircraft-details/<icao24>")
+def api_aircraft_details(icao24):
+    hex_code = re.sub(r"[^0-9a-fA-F]", "", icao24).lower()
+    if not re.fullmatch(r"[0-9a-f]{6}", hex_code):
+        return jsonify({"error": "A valid six-character ICAO24 hex code is required."}), 400
+
+    now = time.time()
+    cached = AIRCRAFT_LOOKUP_CACHE.get(hex_code)
+    if cached and now - cached["timestamp"] < AIRCRAFT_LOOKUP_CACHE_SECONDS:
+        return jsonify(cached["data"])
+
+    details = {"icao24": hex_code, "registration": None, "type_code": None,
+               "model": None, "manufacturer": None, "operator": None,
+               "category": None, "typical_seats": None, "maximum_seats": None,
+               "range_km": None, "cruise_kmh": None, "engines": None,
+               "source": "ADSBdb aircraft registry + local model reference",
+               "note": "Seating is a typical model-level estimate, not a verified seat count for this exact aircraft."}
+    try:
+        response = requests.get(f"https://api.adsbdb.com/v0/aircraft/{hex_code}", timeout=7,
+                                headers={"User-Agent": "GlobalFlightRadar/1.0"})
+        if response.ok:
+            payload = response.json().get("response", {}).get("aircraft", {}) or {}
+            details["registration"] = payload.get("reg") or payload.get("registration")
+            details["type_code"] = (payload.get("type") or payload.get("icaoType") or "").upper() or None
+            details["model"] = payload.get("desc") or payload.get("model") or None
+            details["manufacturer"] = payload.get("manufacturer") or None
+            details["operator"] = payload.get("owner") or payload.get("operator") or None
+            details["category"] = payload.get("category") or None
+    except Exception as error:
+        print(f"Aircraft registry lookup failed for {hex_code}: {error}")
+
+    spec = AIRCRAFT_SPECS.get(details["type_code"] or "")
+    if spec:
+        details.update({
+            "model": details["model"] or spec["model"],
+            "manufacturer": details["manufacturer"] or spec["manufacturer"],
+            "category": details["category"] or spec["category"],
+            "typical_seats": spec["seats"],
+            "maximum_seats": spec["max_seats"],
+            "range_km": spec["range_km"],
+            "cruise_kmh": spec["cruise_kmh"],
+            "engines": spec["engines"]
+        })
+    details["found"] = bool(details["registration"] or details["type_code"] or details["model"])
+    AIRCRAFT_LOOKUP_CACHE[hex_code] = {"timestamp": now, "data": details}
+    return jsonify(details)
+
 
 if __name__ == "__main__":
     setup_database()
